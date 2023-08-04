@@ -22,6 +22,11 @@ from copy import deepcopy
 
 parser = argparse.ArgumentParser('TGCL')
 
+# training settings
+
+parser.add_argument('--debug_mode', type=int, default=0, help='debug mode')
+parser.add_argument('--verbose', type=int, default=0, help='debug mode')
+
 # general parameters
 
 parser.add_argument('--dataset', type=str,default='yelp')
@@ -65,6 +70,13 @@ parser.add_argument('--memory_replay_weight', type=int, default=1, help='Weight 
 parser.add_argument('--replay_select_mode', type=str, default='random', help='How to select the data from the memory')
 parser.add_argument('--replay_size', type=int, default=100, help='The number of data to replay')
 
+parser.add_argument('--explainer', type=str, default='PGExplainer', help='Explainer')
+parser.add_argument('--explainer_train_epoch', type=int, default=100, help='Number of epochs to train the explainer')
+parser.add_argument('--explainer_lr', type=float, default=0.001, help='Learning rate of the explainer')
+parser.add_argument('--explainer_batch_size', type=int, default=100, help='Batch size of the explainer')
+parser.add_argument('--explainer_reg_coefs', type=float, default=0.1, help='Regularization coefficient of the explainer')
+parser.add_argument('--explainer_level', type=str, default='node', help='the explanation level, node or graph')
+
 # backbone model parameters
 
 parser.add_argument('--use_feature', type=str, default='fg', help='Use node feature or not')
@@ -102,6 +114,9 @@ parser.add_argument('--recover', type=int, default=1, help='recover')
 
 parser.add_argument('--class_balance', type=int, default=1, help='class balance')
 parser.add_argument('--eval_avg', type=str, default='node', help='evaluation average')
+
+parser.add_argument('--results_dir', type=str, default='.', help='results diretion')
+parser.add_argument('--explainer_ckpt_dir', type=str, default='.', help='check point direction for the explainer')
 
 
 log_to_file = True

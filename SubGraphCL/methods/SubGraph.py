@@ -194,6 +194,21 @@ class SubGraph(nn.Module):
 
             self.memory.update_memory(cur_memory)
 
+        elif self.args.select_mode == 'explainer':
+            from SubGraph_utils import PGExplainerExt
+
+            explainer = PGExplainerExt(self.model.base_model, self.args.model, self.args.explainer, self.args.dataset, self.args.node_init_dim, self.args, \
+                                       train_data, self.args.explanation_level, self.args.device, self.args.verbose, self.args.results_dir, self.args.debug_mode, \
+                                        self.args.explainer_train_epochs, self.args.explainer_ckpt_dir, self.args.explainer_reg_coefs, self.args.explainer_batch_size, self.args.explainer_lr)
+
+            # train the explainer
+
+            
+
+# self, model, model_name: str, explainer_name: str, dataset_name: str, input_dim: int, args,
+#                  all_events: DataFrame,  explanation_level: str, device, verbose: bool = True, results_dir = None, debug_mode=True,
+#                  # specific params for PGExplainerExt
+#                  train_epochs: int = 50, explainer_ckpt_dir = None, reg_coefs = None, batch_size = 64, lr=1e-4
 
 
     def get_acc(self, x, y):
