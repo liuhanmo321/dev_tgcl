@@ -65,7 +65,8 @@ parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
 
 parser.add_argument('--memory_replay', type=int, default=0, help='Use memory buffer or not')
 parser.add_argument('--select_mode', type=str, default='random', help='How to select the data into the memory')
-parser.add_argument('--memory_size', type=int, default=50, help='Size of memory buffer')
+parser.add_argument('--memory_size', type=float, default=100, help='Size of memory buffer')
+parser.add_argument('--memory_frac', type=float, default=-1, help='Size of memory buffer')
 parser.add_argument('--memory_replay_weight', type=int, default=1, help='Weight for replaying memory')
 parser.add_argument('--replay_select_mode', type=str, default='random', help='How to select the data from the memory')
 parser.add_argument('--replay_size', type=int, default=100, help='The number of data to replay')
@@ -215,8 +216,9 @@ for rp in range(rp_times):
     device = 'cuda'
     logger.debug(str(args))
 
-    # device = 'cpu'
-    # args.device = device
+    if args.debug_mode > 0:
+        device = 'cpu'
+        args.device = device
 
     g_time=0
 
@@ -249,6 +251,11 @@ for rp in range(rp_times):
     cur_val_data = None
 
     for task in range(0,args.num_datasets):
+        
+        if args.memory_frac > 0:
+            args.memory_size = int(args.memory_frac * len(train_data[task].src))
+            print("the memory size is", args.memory_size)
+
         # initialize temporal graph
         if (task == 0) or (args.method != 'Joint'):
             cur_train_data = deepcopy(train_data[task])

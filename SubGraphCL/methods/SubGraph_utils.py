@@ -45,21 +45,21 @@ def _create_explainer_input(model, model_name, all_events, candidate_events=None
         event_idx_u, event_idx_i, event_idx_t = _set_tgat_data(all_events, event_idx)
         # event_idx_new = _set_tgat_events_idxs(event_idx)
         event_idx_new = event_idx
-        t_idx_u_emb = model.node_raw_embed[ torch.tensor(event_idx_u, dtype=torch.int64, device=device), : ]
-        t_idx_i_emb = model.node_raw_embed[ torch.tensor(event_idx_i, dtype=torch.int64, device=device), : ]
+        t_idx_u_emb = model.node_raw_features[ torch.tensor(event_idx_u, dtype=torch.int64, device=device), : ]
+        t_idx_i_emb = model.node_raw_features[ torch.tensor(event_idx_i, dtype=torch.int64, device=device), : ]
         # import ipdb; ipdb.set_trace()
         t_idx_t_emb = model.time_encoder( torch.tensor(event_idx_t, dtype=torch.float32, device=device).reshape((1, -1)) ).reshape((1, -1))
-        t_idx_e_emb = model.edge_raw_embed[ torch.tensor([event_idx_new, ], dtype=torch.int64, device=device), : ]
+        t_idx_e_emb = model.edge_raw_features[ torch.tensor([event_idx_new, ], dtype=torch.int64, device=device), : ]
         
         target_event_emb = torch.cat([t_idx_u_emb,t_idx_i_emb, t_idx_t_emb, t_idx_e_emb ], dim=1)
         
         candidate_events_u, candidate_events_i, candidate_events_t = _set_tgat_data(all_events, candidate_events)
         candidate_events_new = candidate_events
 
-        candidate_u_emb = model.node_raw_embed[ torch.tensor(candidate_events_u, dtype=torch.int64, device=device), : ]
-        candidate_i_emb = model.node_raw_embed[ torch.tensor(candidate_events_i, dtype=torch.int64, device=device), : ]
+        candidate_u_emb = model.node_raw_features[ torch.tensor(candidate_events_u, dtype=torch.int64, device=device), : ]
+        candidate_i_emb = model.node_raw_features[ torch.tensor(candidate_events_i, dtype=torch.int64, device=device), : ]
         candidate_t_emb = model.time_encoder( torch.tensor(candidate_events_t, dtype=torch.float32, device=device).reshape((1, -1)) ).reshape((len(candidate_events_t), -1))
-        candidate_e_emb = model.edge_raw_embed[ torch.tensor(candidate_events_new, dtype=torch.int64, device=device), : ]
+        candidate_e_emb = model.edge_raw_features[ torch.tensor(candidate_events_new, dtype=torch.int64, device=device), : ]
 
         candiadte_events_emb = torch.cat([candidate_u_emb, candidate_i_emb, candidate_t_emb, candidate_e_emb], dim=1)
 
@@ -102,9 +102,12 @@ class BaseExplainerTG(object):
         # from tgnnexplainer.xgraph.method.tg_score import _set_tgat_events_idxs # NOTE: important
 
         if self.model_name in ['tgat', 'tgn']:
-            ngh_finder = self.model.ngh_finder
-            num_layers = self.model.num_layers
-            num_neighbors = self.model.num_neighbors # NOTE: important
+            # ngh_finder = self.model.ngh_finder
+            # num_layers = self.model.num_layers
+            # num_neighbors = self.model.num_neighbors # NOTE: important
+            ngh_finder = self.model.base_model.ngh_finder
+            num_layers = self.model.base_model.num_layers
+            num_neighbors = self.model.base_model.num_neighbors # NOTE: important
             # edge_idx_preserve_list = self.ori_subgraph_df.e_idx.to_list() # NOTE: e_idx column
 
             u = self.all_events.iloc[target_event_idx-1, 0] # because target_event_idx should represent e_idx. e_idx = index + 1
@@ -289,7 +292,7 @@ class PGExplainerExt(BaseExplainerTG):
             return f'./checkpoints/{self.args.model}/' + str(vars(self.args)) + f'_expl_ckpt.pth{epoch}'
     
     def _init_explainer(self):
-        self.explainer_model = self._create_explainer(self.model, self.model_name, self.device)
+        self.explainer_model = self._create_explainer(self.model.base_model, self.model_name, self.device)
 
     def __call__(self, node_idxs: Union[int, None] = None, event_idxs: Union[int, None] = None):
         self.explainer_ckpt_path = self._ckpt_path(self.explainer_ckpt_dir, self.model_name, self.dataset_name, self.explainer_name)
@@ -313,14 +316,14 @@ class PGExplainerExt(BaseExplainerTG):
         # import ipdb; ipdb.set_trace()
         return results_list
 
-    
+    ## TODO: This function is of great importance to modify!!!!!!!!!!!!    
     def _tg_predict(self, event_idx, use_explainer=False):
         if self.model_name in ['tgat', 'tgn']:
             src_idx_l, target_idx_l, cut_time_l = _set_tgat_data(self.all_events, event_idx)
             edge_weights = None
             if use_explainer:
                 # candidate_events_new = _set_tgat_events_idxs(self.candidate_events) # these temporal edges to alter attn weights in tgat
-                input_expl = _create_explainer_input(self.model, self.model_name, self.all_events, \
+                input_expl = _create_explainer_input(self.model.base_model, self.model_name, self.all_events, \
                     candidate_events=self.candidate_events, event_idx=event_idx, device=self.device)
                 # import ipdb; ipdb.set_trace()
                 edge_weights = self.explainer_model(input_expl)
@@ -330,7 +333,7 @@ class PGExplainerExt(BaseExplainerTG):
             else:
                 candidate_weights_dict = None
             # NOTE: use the 'src_ngh_eidx_batch' in module to locate mask fill positions
-            output = self.model.get_prob( src_idx_l, target_idx_l, cut_time_l, logit=True, candidate_weights_dict=candidate_weights_dict)
+            output = self.model(src_idx_l, target_idx_l, cut_time_l, logit=True, candidate_weights_dict=candidate_weights_dict)
             return output, edge_weights
 
         else: 
@@ -363,15 +366,15 @@ class PGExplainerExt(BaseExplainerTG):
         return error_loss
     
     def _obtain_train_idxs(self,):
-        size = 1000
+        size = min(1000, int(len(self.all_events)*0.4))
         # np.random.seed( np.random.randint(10000) )
-        if self.dataset_name in ['wikipedia', 'reddit']:
-            train_e_idxs = np.random.randint(int(len(self.all_events)*0.2), int(len(self.all_events)*0.6), (size, ))
-            train_e_idxs = shuffle(train_e_idxs) # TODO: not shuffle?
-        elif self.dataset_name in ['simulate_v1', 'simulate_v2']:
-            positive_indices = self.all_events.label == 1 
-            pos_events = self.all_events[positive_indices].e_idx.values
-            train_e_idxs = np.random.choice(pos_events, size=size, replace=False)
+        # if self.dataset_name in ['wikipedia', 'reddit']:
+        train_e_idxs = np.random.randint(int(len(self.all_events)*0.2), int(len(self.all_events)*0.6), (size, ))
+        train_e_idxs = shuffle(train_e_idxs) # TODO: not shuffle?
+        # elif self.dataset_name in ['simulate_v1', 'simulate_v2']:
+        #     positive_indices = self.all_events.label == 1 
+        #     pos_events = self.all_events[positive_indices].e_idx.values
+        #     train_e_idxs = np.random.choice(pos_events, size=size, replace=False)
 
         return train_e_idxs
 
@@ -428,7 +431,7 @@ class PGExplainerExt(BaseExplainerTG):
 
     def explain(self, node_idx=None, event_idx=None):
         self.explainer_model.eval()
-        input_expl = _create_explainer_input(self.model, self.model_name, self.all_events, \
+        input_expl = _create_explainer_input(self.model.base_model, self.model_name, self.all_events, \
             candidate_events=self.candidate_events, event_idx=event_idx, device=self.device)
         event_idx_scores = self.explainer_model(input_expl) # compute importance scores
         event_idx_scores = event_idx_scores.cpu().detach().numpy().flatten()

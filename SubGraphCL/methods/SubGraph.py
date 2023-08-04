@@ -160,6 +160,7 @@ class SubGraph(nn.Module):
                 src_pred_bank = torch.cat(src_pred_bank, dim=0)
                 dst_pred_bank = torch.cat(dst_pred_bank, dim=0)
             
+            zero_preds = torch.zeros(src_pred_bank.shape).to(self.args.device)
             seen_task = len(self.memory.memory)
             cur_memory = None
             for c in range(seen_task * self.args.num_class_per_dataset, (seen_task + 1) * self.args.num_class_per_dataset):
@@ -169,19 +170,24 @@ class SubGraph(nn.Module):
                 task_mp_dst = task_mp_dst | (torch.tensor(train_data.labels_dst) == c)
 
                 task_mp = task_mp_src | task_mp_dst
+                # task_mp_and = task_mp_src & task_mp_dst
+                # task_mp_src_and = task_mp_src & (~task_mp_dst)
+                # task_mp_dst_and = task_mp_dst & (~task_mp_src)
+                
+                temp_src_pred_bank = torch.zeros(src_pred_bank.shape).to(self.args.device)
+                temp_src_pred_bank[task_mp_src] = src_pred_bank[task_mp_src]
 
-                total_emb_bank = torch.cat([src_pred_bank[task_mp_src], dst_pred_bank[task_mp_dst]], dim=0)
-                mean_emb = torch.mean(total_emb_bank)
+                temp_dst_pred_bank = torch.zeros(dst_pred_bank.shape).to(self.args.device)
+                temp_dst_pred_bank[task_mp_dst] = dst_pred_bank[task_mp_dst]
 
-                dist_src = -torch.nn.CosineSimilarity()(src_pred_bank[task_mp], mean_emb)
-                dist_dst = -torch.nn.CosineSimilarity()(dst_pred_bank[task_mp], mean_emb)
-
-                total_dist = dist_src + dist_dst
+                mean_pred_event = (temp_src_pred_bank[task_mp] + temp_dst_pred_bank[task_mp]) / 2
 
                 memory_size_class = int(args.memory_size / self.args.num_class_per_dataset)
-                memory_size_class = min(memory_size_class, len(total_dist))
-                _, sampled_idx_class = torch.sort(total_dist, stable=True)
-                sampled_idx_class = sampled_idx_class[:memory_size_class]
+                memory_size_class = min(memory_size_class, len(mean_pred_event))
+                _, sampled_idx_class = torch.sort(mean_pred_event, stable=True, descending=True)
+                sampled_idx_class = sampled_idx_class[:memory_size_class].cpu()
+
+                print(sampled_idx_class.shape)
 
                 if cur_memory == None:
                     cur_memory = Data(train_data.src[task_mp][sampled_idx_class], train_data.dst[task_mp][sampled_idx_class], \
@@ -200,6 +206,10 @@ class SubGraph(nn.Module):
             explainer = PGExplainerExt(self.model.base_model, self.args.model, self.args.explainer, self.args.dataset, self.args.node_init_dim, self.args, \
                                        train_data, self.args.explanation_level, self.args.device, self.args.verbose, self.args.results_dir, self.args.debug_mode, \
                                         self.args.explainer_train_epochs, self.args.explainer_ckpt_dir, self.args.explainer_reg_coefs, self.args.explainer_batch_size, self.args.explainer_lr)
+
+
+            explainer._train()
+
 
             # train the explainer
 

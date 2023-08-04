@@ -89,7 +89,7 @@ class TGAN(torch.nn.Module):
         neg_score = self.affinity_score(src_embed, background_embed).squeeze(dim=-1)
         return pos_score.sigmoid(), neg_score.sigmoid()
 
-    def tem_conv(self, src_idx_l, cut_time_l, curr_layers, num_neighbors=20):
+    def tem_conv(self, src_idx_l, cut_time_l, curr_layers, num_neighbors=20, candidate_weights_dict=None):
         assert(curr_layers >= 0)
         
         device = self.device
@@ -111,7 +111,8 @@ class TGAN(torch.nn.Module):
             src_node_conv_feat = self.tem_conv(src_idx_l, 
                                            cut_time_l,
                                            curr_layers=curr_layers - 1, 
-                                           num_neighbors=num_neighbors)
+                                           num_neighbors=num_neighbors,
+                                           candidate_weights_dict=candidate_weights_dict)
             
             
             src_ngh_node_batch, src_ngh_eidx_batch, src_ngh_t_batch = self.ngh_finder.get_temporal_neighbor( 
@@ -131,7 +132,8 @@ class TGAN(torch.nn.Module):
             src_ngh_node_conv_feat = self.tem_conv(src_ngh_node_batch_flat, 
                                                    src_ngh_t_batch_flat,
                                                    curr_layers=curr_layers - 1, 
-                                                   num_neighbors=num_neighbors)
+                                                   num_neighbors=num_neighbors,
+                                                   candidate_weights_dict=candidate_weights_dict)
             src_ngh_feat = src_ngh_node_conv_feat.view(batch_size, num_neighbors, -1)
             
             # get edge time features and node features
@@ -142,7 +144,20 @@ class TGAN(torch.nn.Module):
             # attention aggregation
             mask = src_ngh_node_batch_th == 0
             attn_m = self.attn_model_list[curr_layers - 1]
-            
+
+            if candidate_weights_dict is not None:
+                event_idxs = candidate_weights_dict['candidate_events']
+                event_weights = candidate_weights_dict['edge_weights']
+
+                ###### version 1, event_weights not [0, 1]
+                position0 = src_ngh_node_batch_th == 0
+                mask = torch.zeros_like(src_ngh_node_batch_th).to(dtype=torch.float32) # NOTE: for +, 0 mean no influence
+                # import ipdb; ipdb.set_trace()
+                for i, e_idx in enumerate(event_idxs):
+                    indices = src_ngh_eidx_batch == e_idx
+                    mask[indices] = event_weights[i]
+                mask[position0] = -1e10 # addition attention, as 0 masks
+
             local, weight = attn_m(src_node_conv_feat, 
                                    src_node_t_embed,
                                    src_ngh_feat,
@@ -152,9 +167,9 @@ class TGAN(torch.nn.Module):
             return local
     
 
-    def get_embeddings(self, src_idx_l, target_idx_l, edge_idxs, cut_time_l, negative_nodes=None, num_neighbors=20):
-        src_embed = self.tem_conv(src_idx_l, cut_time_l, self.num_layers, num_neighbors)
-        target_embed = self.tem_conv(target_idx_l, cut_time_l, self.num_layers, num_neighbors)
+    def get_embeddings(self, src_idx_l, target_idx_l, edge_idxs, cut_time_l, negative_nodes=None, num_neighbors=20, candidate_weights_dict=None):
+        src_embed = self.tem_conv(src_idx_l, cut_time_l, self.num_layers, num_neighbors, candidate_weights_dict=candidate_weights_dict)
+        target_embed = self.tem_conv(target_idx_l, cut_time_l, self.num_layers, num_neighbors, candidate_weights_dict=candidate_weights_dict)
         
         return src_embed, target_embed
     

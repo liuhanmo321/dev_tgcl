@@ -79,14 +79,14 @@ class TemporalGNNClassifier(nn.Module):
         return self.base_model.get_embeddings(src_nodes, dst_nodes, edges, edge_times, n_neighbors)
     
 
-    def forward(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None, return_logits=False):
+    def forward(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None, return_logits=False, candidate_weights_dict=None):
 
         # Get the embeddings
         if self.multihead:
             cur_label_src = deepcopy(self.src_label[edges])
             cur_label_dst = deepcopy(self.dst_label[edges])
 
-            src_embeddings, dst_embeddings = self.base_model.get_embeddings(src_nodes, dst_nodes, edges, edge_times, n_neighbors)
+            src_embeddings, dst_embeddings = self.base_model.get_embeddings(src_nodes, dst_nodes, edges, edge_times, n_neighbors, candidate_weights_dict=candidate_weights_dict)
             
             # Pass the embeddings through the MLP heads
             if self.args.feature_type == 'embedded':

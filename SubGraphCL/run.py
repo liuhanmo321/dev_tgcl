@@ -13,6 +13,7 @@ n_epoch = 400
 
 device=1
 rp_times=3
+debug_mode = 0
 
 select = 'none' 
 Path("./result/").mkdir(parents=True, exist_ok=True)
@@ -40,8 +41,8 @@ if dataset == 'taobao':
     num_class_per_dataset=30
     n_epoch=100
 
-select_mode = 'random'
-memory_size = 100
+select_mode = 'mean_pred'
+memory_size = 50
 
 n_interval=5
 n_mc=0
@@ -76,7 +77,9 @@ sk=1000
 full_n=0
 recover=1
 
-
+if debug_mode > 0:
+    n_epoch = 1
+    rp_times = 1
 
 cmd = "python train.py --batch_size {} --dataset {} --num_neighbors {} --n_epoch {} --lr {} --select {} --num_datasets {} --num_class_per_dataset {} --n_interval {} --n_mc {}".format(bs, dataset, num_neighbors,
 n_epoch, lr, select, num_datasets, num_class_per_dataset,n_interval, n_mc)
@@ -111,4 +114,5 @@ cmd += " --dis_IB {}".format(dis_IB)
 cmd += " --ch_IB {}".format(ch_IB)
 cmd += " --select_mode {}".format(select_mode)
 cmd += " --memory_size {}".format(memory_size)
+cmd += " --debug_mode {}".format(debug_mode)
 os.system(cmd)
