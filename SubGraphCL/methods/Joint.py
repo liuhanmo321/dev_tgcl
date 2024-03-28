@@ -17,7 +17,7 @@ class Joint(nn.Module):
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=args.lr)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=100, gamma=0.5)
 
-    def forward(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None):
+    def forward(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None, src_avail_mask=None, dst_avail_mask=None):
         self.model.detach_memory()
         if self.args.task == 'nodecls':
             return self.forward_nodecls(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx)
@@ -27,7 +27,7 @@ class Joint(nn.Module):
     def forward_linkpred(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx):
         return
     
-    def forward_nodecls(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None):
+    def forward_nodecls(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None, src_avail_mask=None, dst_avail_mask=None):
 
         data_dict = {}
 
@@ -35,6 +35,15 @@ class Joint(nn.Module):
             loss = self.model(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx)
 
             data_dict['loss'] = loss.item()
+
+            if self.args.l2_norm:
+                l2_reg = torch.tensor(0.).to(self.args.device)
+                for param in self.model.parameters():
+                    if param.requires_grad:
+                        l2_reg += torch.norm(param)
+                loss += self.args.l2_weight * l2_reg
+
+                data_dict['l2_reg'] = l2_reg.item()
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -61,11 +70,26 @@ class Joint(nn.Module):
         return correct
 
     def get_logits(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx):
-        src_logits, dst_logits = self.model(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx, return_logits=True)
-        return src_logits, dst_logits
+        src_logits = self.model(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx, return_logits=True)
+        return src_logits
     
     def end_dataset(self, train_data, args):
         return
+    
+    def begin_task(self, args, data, task):
+        mask = np.ones_like(data.src).astype(bool)
+        return mask, mask, mask
+
+    def set_features(self, node_features, edge_features):
+        if node_features is not None:
+            self.model.base_model.node_raw_features = torch.from_numpy(node_features.astype(np.float32)).to(self.args.device)
+        else:
+            self.model.base_model.node_raw_features = None
+        
+        if edge_features is not None:
+            self.model.base_model.edge_raw_features = torch.from_numpy(edge_features.astype(np.float32)).to(self.args.device)
+        else:
+            self.model.base_model.edge_raw_features = None
 
     def reset_graph(self):
         return

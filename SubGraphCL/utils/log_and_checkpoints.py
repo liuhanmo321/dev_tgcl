@@ -21,6 +21,8 @@ def set_logger(model, dataset, prefix, to_file):
   logger.info("Model:{}, Dataset:{}".format(model, dataset))
   return logger, timenow
 
+def get_mid_model_path(model, timenow, task):
+  return "log/{}/{}/mid_models/task{}.pth".format(model, timenow, task)
 
 def get_checkpoint_path(model, timenow, task, uml):
   return "log/{}/{}/checkpoints/task{}.pth".format(model, timenow, task), "log/{}/{}/checkpoints/task{}_mem.pth".format(model, timenow, task),"log/{}/{}/checkpoints/task{}_IB.pth".format(model, timenow, task), "log/{}/{}/checkpoints/task{}_PGen.pth".format(model, timenow, task)

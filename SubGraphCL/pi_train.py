@@ -53,13 +53,13 @@ parser.add_argument('--num_neighbors', type=int, default=5, help='Number of neig
 
 parser.add_argument('--supervision', type=str, default='supervised', help='Supervision type')
 parser.add_argument('--task', type=str, default='nodecls', help='Task type')
-parser.add_argument('--feature_type', type=str, default='embedded', help='The type of features used for node classification')
+parser.add_argument('--feature_type', type=str, default='both', help='The type of features used for node classification')
 
 # continual learning method parameters
 
 parser.add_argument('--multihead', type=int, default=0, help='whether to use multihead classifiers for each data set')
 parser.add_argument('--head_hidden_dim', type=int, default=100, help='Number of hidden dimensions of the head classifier')
-parser.add_argument('--num_layers', type=int, default=2, help='Number of TGNN layers')
+parser.add_argument('--num_layers', type=int, default=1, help='Number of TGNN layers')
 parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
 
 # Memory parameters
@@ -112,12 +112,12 @@ parser.add_argument('--rand_neighbor', type=int, default=0, help='Whether to sam
 parser.add_argument('--temperature', type=float, default=2.0, help='Temperature for distillation')
 parser.add_argument('--ewc_weight', type=float, default=1.0, help='The weight for EWC loss')
 
-parser.add_argument('--explainer', type=str, default='PGExplainer', help='Explainer')
-parser.add_argument('--explainer_train_epoch', type=int, default=100, help='Number of epochs to train the explainer')
-parser.add_argument('--explainer_lr', type=float, default=0.001, help='Learning rate of the explainer')
-parser.add_argument('--explainer_batch_size', type=int, default=100, help='Batch size of the explainer')
-parser.add_argument('--explainer_reg_coefs', type=float, default=0.1, help='Regularization coefficient of the explainer')
-parser.add_argument('--explainer_level', type=str, default='node', help='the explanation level, node or graph')
+# parser.add_argument('--explainer', type=str, default='PGExplainer', help='Explainer')
+# parser.add_argument('--explainer_train_epoch', type=int, default=100, help='Number of epochs to train the explainer')
+# parser.add_argument('--explainer_lr', type=float, default=0.001, help='Learning rate of the explainer')
+# parser.add_argument('--explainer_batch_size', type=int, default=100, help='Batch size of the explainer')
+# parser.add_argument('--explainer_reg_coefs', type=float, default=0.1, help='Regularization coefficient of the explainer')
+# parser.add_argument('--explainer_level', type=str, default='node', help='the explanation level, node or graph')
 
 # backbone model parameters
 
@@ -136,7 +136,10 @@ parser.add_argument('--use_IB', type=int, default=1, help='use IB')
 parser.add_argument('--dis_IB', type=int, default=1, help='dis IB')
 parser.add_argument('--ch_IB', type=str, default='m', help='ch IB')
 parser.add_argument('--pattern_rho', type=float, default=0.1, help='pattern_rho')
-parser.add_argument('--num_attn_heads', type=int, default=2, help='Number of attention heads')
+parser.add_argument('--num_attn_heads', type=int, default=4, help='Number of attention heads')
+
+parser.add_argument('--l2_norm', type=bool, default=True, help='L2 norm')
+parser.add_argument('--l2_weight', type=float, default=0.001, help='L2 weight')
 
 parser.add_argument('--node_init_dim', type=int, default=128, help='node initial feature dimension')
 parser.add_argument('--node_embedding_dim', type=int, default=128, help='node embedding feature dimension')
@@ -170,15 +173,6 @@ parser.add_argument('--eval_metric', type=str, default='acc', help='evaluation m
 
 log_to_file = True
 args = parser.parse_args()
-args.dataset = args.dataset
-args.model = args.model
-args.select = args.select
-args.n_epoch = args.n_epoch
-args.batch_size = args.batch_size
-args.num_neighbors = args.num_neighbors
-args.lr = args.lr
-args.num_datasets = args.num_datasets
-args.num_class_per_dataset = args.num_class_per_dataset
 args.num_class = args.num_datasets * args.num_class_per_dataset
 n_interval = args.n_interval
 n_mc = args.n_mc
@@ -259,7 +253,7 @@ for rp in range(rp_times):
 
     print(str(args))
     # data processing
-    node_features, edge_features, full_data, train_data, val_data, test_data, all_data, _, _ = get_data(args.dataset,args.num_datasets,args.num_class_per_dataset,blurry)
+    node_features, edge_features, full_data, train_data, val_data, test_data, all_data, _, _ = get_past_inductive_data(args.dataset,args.num_datasets,args.num_class_per_dataset,blurry)
     
     args.node_init_dim = node_features.shape[1]
     args.node_embedding_dim = node_features.shape[1]
@@ -307,9 +301,8 @@ for rp in range(rp_times):
     logger.debug("./result/{}.txt".format(args.dataset+args.filename_add))
     LOSS = []
     val_acc, val_ap, val_f1 = [], [], []
-    early_stopper = [EarlyStopMonitor(max_round=patience) for i in range(args.num_datasets+1)]
+    early_stopper = [EarlyStopMonitor(max_round=patience, higher_better=False) for i in range(args.num_datasets+1)]
     test_best=[0 for i in range(args.num_datasets)]
-    test_neighbor_finder=[]
 
     if not os.path.exists(f'./checkpoints/{args.model}/'):
         os.makedirs(f'./checkpoints/{args.model}/')
@@ -318,18 +311,9 @@ for rp in range(rp_times):
     cur_test_data = None
     cur_val_data = None
 
-    if args.method == 'Joint':
-        cur_train_data = [train_data[t] for t in range(args.num_datasets)]
-        cur_test_data = [test_data[t] for t in range(args.num_datasets)]
-        cur_val_data = [val_data[t] for t in range(args.num_datasets)]
-
-    cum_train_data = None
-    cum_val_data = None
-
-    for task in range(0,args.num_datasets):
-
-        # if args.method == 'Separate':
-        #     sgnn = get_model(args, neighbor_finder, node_features, edge_features, label_src, label_dst)
+    # for task in range(0,args.num_datasets):
+    task_bar = tqdm(range(0,args.num_datasets), desc='Task', position=0, leave=True)
+    for task in task_bar:
 
         args.mid_model_path = get_mid_model_path(args.model, time_now, task)
         
@@ -337,148 +321,129 @@ for rp in range(rp_times):
             args.memory_size = int(args.memory_frac * len(train_data[task].src))
             print("the memory size is", args.memory_size)
 
-        if args.method != 'Joint':
-            cur_train_data = deepcopy(train_data[task])
-            cur_test_data = deepcopy(test_data[task])
-            cur_val_data = deepcopy(val_data[task])
-
         if task == 0:
             cum_train_data = deepcopy(train_data[task])
         else:
-            cum_train_data.add_data(val_data[task - 1])
             cum_train_data.add_data(train_data[task])
+            
+        cum_val_data = deepcopy(cum_train_data)
+        cum_val_data.add_data(val_data[task])
+        
+        cum_test_data = deepcopy(cum_val_data)
+        cum_test_data.add_data(test_data[task])
 
-        if task == 0:
-            cum_val_data = deepcopy(val_data[task])
-        else:
-            cum_val_data.add_data(val_data[task])
-
-        # memory_neighbor_finder = get_neighbor_sampler(cur_train_data, False)
-        # train_neighbor_finder = get_neighbor_sampler(cur_train_data, False)
         train_neighbor_finder = get_neighbor_sampler(cum_train_data, 'recent')
-        # test_neighbor_finder.append(get_neighbor_sampler(all_data, 'recent', mask=test_data[task]))
-        # test_neighbor_finder.append(get_neighbor_sampler(temp_test_data, 'recent'))
-        full_neighbor_finder = get_neighbor_sampler(all_data, 'recent')
+        val_neighbor_finder = get_neighbor_sampler(cum_val_data, 'recent')
+        test_neighbor_finder = get_neighbor_sampler(cum_test_data, 'recent')
 
         if args.rand_neighbor and args.method == 'SubGraph':
             rand_sampler = RandEdgeSampler(cum_train_data.src, cum_train_data.dst)
             sgnn.set_sampler(rand_sampler)
 
-        if hasattr(sgnn, 'begin_task') and task > 0 and args.memory_replay:
-            sgnn.begin_task(args, train_data[:(task+1)])
+        sgnn.set_neighbor_finder(train_neighbor_finder)
+        cur_train_data = deepcopy(train_data[task])
+
+        if hasattr(sgnn, 'begin_task') and task > 0:
+            train_avail_mask, train_src_avail_mask, train_dst_avail_mask = sgnn.begin_task(args, train_data[task], task)
+            cur_train_data.apply_mask(train_avail_mask, train_src_avail_mask, train_dst_avail_mask)
 
         # balance the weights for classes
         class_weights = np.zeros((task + 1, args.num_class_per_dataset))
-        if hasattr(sgnn, 'memory') and task > 0 and args.memory_replay:
-            src_labels = np.concatenate((train_data[task].labels_src, sgnn.memory.total_memory.labels_src))
-            dst_labels = np.concatenate((train_data[task].labels_dst, sgnn.memory.total_memory.labels_dst))
-        else:
-            src_labels = train_data[task].labels_src
-            dst_labels = train_data[task].labels_dst
+        src_labels = train_data[task].labels_src
+        dst_labels = train_data[task].labels_dst
 
         src_class_stat = np.unique(src_labels, return_counts=True)
         dst_class_stat = np.unique(dst_labels, return_counts=True)
 
-        print(src_class_stat)
+        # print('current full training data class stat:', src_class_stat)
+        # print('available training data class stat: ', np.unique(cur_train_data.labels_src[cur_train_data.src_avail_mask], return_counts=True))
+        # print('available training data class stat: ', np.unique(cur_train_data.labels_dst[cur_train_data.dst_avail_mask], return_counts=True))
+
+        # print('available testing data class stat: ', np.unique(test_data[task].labels_src, return_counts=True))
                 
-        for e in range(args.n_epoch):
+        epoch_bar = tqdm(range(args.n_epoch), desc='Epoch', position=1, leave=True)
+        for e in epoch_bar:
+
             epoch_start_time = time.time()
 
             print("task:",task,"epoch:",e)
             logger.debug('task {} , start {} epoch'.format(task,e))
 
-            loss_value = 0
-            Obj = 0
+            # loss_value = 0
+            loss_dict = {'loss': 0, 'l2_reg': 0}
             Reward = 0
             sgnn.reset_graph()
             sgnn.set_neighbor_finder(train_neighbor_finder)
             sgnn.train()
 
-            if args.method != 'Joint':
-
-                num_batch_old = 0
-                if hasattr(sgnn, 'memory') and task > 0 and args.memory_replay:
-                    memory_data = sgnn.memory.get_full_data()
-                    num_batch_old = math.ceil(len(memory_data.src) / args.batch_size)
-                    
-                    for i in range(num_batch_old):
-                        st_idx = i * args.batch_size
-                        ed_idx = min((i + 1) * args.batch_size, len(memory_data.src))
-
-                        src_batch = memory_data.src[st_idx:ed_idx]
-                        dst_batch = memory_data.dst[st_idx:ed_idx]
-                        edge_batch = memory_data.edge_idxs[st_idx:ed_idx]
-                        timestamp_batch = memory_data.timestamps[st_idx:ed_idx]
-
-                        data_dict = sgnn(src_batch, dst_batch, edge_batch, timestamp_batch, args.num_neighbors, is_old_data=True, dataset_idx=task)
-
-                        loss_value += data_dict['loss']
-
-                num_batch = math.ceil(len(cur_train_data.src) / args.batch_size)
-                for i in range(num_batch):
+            # Learn the selected data first
+            num_batch_old = 0
+            if hasattr(sgnn, 'memory') and task > 0 and args.memory_replay:
+                memory_data = sgnn.memory.get_full_data()
+                num_batch_old = math.ceil(len(memory_data.src) / args.batch_size)
+                
+                for i in range(num_batch_old):
                     st_idx = i * args.batch_size
-                    ed_idx = min((i + 1) * args.batch_size, len(cur_train_data.src))
+                    ed_idx = min((i + 1) * args.batch_size, len(memory_data.src))
 
-                    src_batch = cur_train_data.src[st_idx:ed_idx]
-                    dst_batch = cur_train_data.dst[st_idx:ed_idx]
-                    edge_batch = cur_train_data.edge_idxs[st_idx:ed_idx]
-                    timestamp_batch = cur_train_data.timestamps[st_idx:ed_idx]
+                    src_batch = memory_data.src[st_idx:ed_idx]
+                    dst_batch = memory_data.dst[st_idx:ed_idx]
+                    edge_batch = memory_data.edge_idxs[st_idx:ed_idx]
+                    timestamp_batch = memory_data.timestamps[st_idx:ed_idx]
 
-                    data_dict = sgnn(src_batch, dst_batch, edge_batch, timestamp_batch, args.num_neighbors, dataset_idx=task)
+                    data_dict = sgnn(src_batch, dst_batch, edge_batch, timestamp_batch, args.num_neighbors, is_old_data=True, dataset_idx=task)
 
-                    loss_value += data_dict['loss']
+                    loss_dict['loss'] += data_dict['loss']
+                    loss_dict['l2_reg'] += data_dict['l2_reg']
 
-                loss_value = loss_value / (num_batch + num_batch_old)
-                Obj=Obj / (num_batch + num_batch_old)
+            num_batch = math.ceil(len(cur_train_data.src) / args.batch_size)
+            
+            # Learn the accessible data next 
+            for i in range(num_batch):
+                st_idx = i * args.batch_size
+                ed_idx = min((i + 1) * args.batch_size, len(cur_train_data.src))
 
-            else:
-                for sub_t in range(task + 1):
-                    sub_loss_value = 0
-                    sub_Obj = 0
-                    num_batch = math.ceil(len(cur_train_data[sub_t].src) / args.batch_size)
-                    for i in range(num_batch):
+                src_batch = cur_train_data.src[st_idx:ed_idx]
+                dst_batch = cur_train_data.dst[st_idx:ed_idx]
+                edge_batch = cur_train_data.edge_idxs[st_idx:ed_idx]
+                timestamp_batch = cur_train_data.timestamps[st_idx:ed_idx]
 
-                        st_idx = i * args.batch_size
-                        ed_idx = min((i + 1) * args.batch_size, len(cur_train_data[sub_t].src))
+                if args.method != 'Joint' and task > 0:
+                    src_avail_mask = cur_train_data.src_avail_mask[st_idx:ed_idx]
+                    dst_avail_mask = cur_train_data.dst_avail_mask[st_idx:ed_idx]
+                else:
+                    src_avail_mask = None
+                    dst_avail_mask = None
 
-                        src_batch = cur_train_data[sub_t].src[st_idx:ed_idx]
-                        dst_batch = cur_train_data[sub_t].dst[st_idx:ed_idx]
-                        edge_batch = cur_train_data[sub_t].edge_idxs[st_idx:ed_idx]
-                        timestamp_batch = cur_train_data[sub_t].timestamps[st_idx:ed_idx]
+                data_dict = sgnn(src_batch, dst_batch, edge_batch, timestamp_batch, args.num_neighbors, dataset_idx=task, src_avail_mask=src_avail_mask, dst_avail_mask=dst_avail_mask)
 
-                        data_dict = sgnn(src_batch, dst_batch, edge_batch, timestamp_batch, args.num_neighbors, dataset_idx=task)
+                loss_dict['loss'] += data_dict['loss']
+                loss_dict['l2_reg'] += data_dict['l2_reg']
 
-                        sub_loss_value += data_dict['loss']            
-
-                    loss_value += sub_loss_value / num_batch
-                    Obj=Obj / num_batch
+            loss_dict['loss'] = loss_dict['loss'] / (num_batch + num_batch_old)
+            loss_dict['l2_reg'] = loss_dict['l2_reg'] / (num_batch + num_batch_old)
+            # Obj=Obj / (num_batch + num_batch_old)
             sgnn.end_epoch()
 
             epoch_end_time = time.time()
             per_epoch_training_time[task].append(epoch_end_time - epoch_start_time)
 
-            loss_mem1.append(loss_value)
-            loss_mem2.append(Obj)
-            print("train loss: %.4f"%loss_value)
-            print("obj: %.4f"%(Obj))
-            LOSS.append(loss_value)
-            logger.debug("loss in whole dataset = {}".format(loss_value))
-
+            loss_mem1.append(loss_dict['loss'])
+            # loss_mem2.append(Obj)
+            # print("train loss: %.4f"%loss_value)
+            # print("obj: %.4f"%(Obj))
+            LOSS.append(loss_dict['loss'])
+            logger.debug("loss in whole dataset = {}".format(loss_dict['loss']))
+            
             # validation
             sgnn.eval()
 
-            # sgnn.reset_graph(full_data[task].unique_nodes)
             sgnn.reset_graph()
-            # train_n_acc, train_n_ap, train_n_f1, train_m_acc = eval_prediction(sgnn, train_data[task], task, task, args.batch_size, 'train', uml, eval_avg, args.multihead, args.num_class_per_dataset)
             _, train_result = eval_prediction(sgnn, train_data[task], task, task, args.batch_size, 'train', uml, eval_avg, args.multihead, args.num_class_per_dataset, within_task=True)
 
-            # if full_n:
-            #     sgnn.set_neighbor_finder(full_neighbor_finder)
-            # else:
-            #     sgnn.set_neighbor_finder(test_neighbor_finder[task])
-            sgnn.set_neighbor_finder(full_neighbor_finder)
+            sgnn.set_neighbor_finder(val_neighbor_finder)
             
-            avg_val_result, task_val_result = eval_prediction(sgnn, cum_val_data, task, task, args.batch_size, 'val', uml, eval_avg, args.multihead, args.num_class_per_dataset, within_task=True)
+            avg_val_result, task_val_result = eval_prediction(sgnn, val_data[task], task, task, args.batch_size, 'test', uml, eval_avg, args.multihead, args.num_class_per_dataset, within_task=True)
 
             if (hasattr(sgnn, "memory") and args.memory_replay) or args.method == 'Joint':
                 val_result = avg_val_result[args.eval_metric]
@@ -497,10 +462,14 @@ for rp in range(rp_times):
                 train_IB_backup = None
                 train_PGen_backup =None
             
-            _, test_result = eval_prediction(sgnn, test_data[task], task, task, args.batch_size, 'test', uml, eval_avg, args.multihead, args.num_class_per_dataset, within_task=True)
+            sgnn.set_neighbor_finder(test_neighbor_finder)
             
-            print(f"train_{args.eval_metric}: {train_result[args.eval_metric][-1]:.2f}  val_{args.eval_metric}: {val_result:.2f}   test_{args.eval_metric}: {test_result[args.eval_metric][-1]:.2f}")
-            logger.debug(f"train_{args.eval_metric}: {train_result[args.eval_metric][-1]:.2f}  val_{args.eval_metric}: {val_result:.2f}   test_{args.eval_metric}: {test_result[args.eval_metric][-1]:.2f}")
+            avg_test_result, test_result = eval_prediction(sgnn, test_data[task], task, task, args.batch_size, 'test', uml, eval_avg, args.multihead, args.num_class_per_dataset, within_task=True)
+            
+            # print(f"train_{args.eval_metric}: {train_result[args.eval_metric][-1]:.2f}  val_{args.eval_metric}: {avg_val_result[args.eval_metric]:.2f}   test_{args.eval_metric}: {avg_test_result[args.eval_metric]:.2f}")
+            logger.debug(f"train_{args.eval_metric}: {train_result[args.eval_metric][-1]:.2f}  val_{args.eval_metric}: {avg_val_result[args.eval_metric]:.2f}   test_{args.eval_metric}: {avg_test_result[args.eval_metric]:.2f}")
+
+            epoch_bar.set_postfix({'loss': loss_dict['loss'], 'l2_reg': loss_dict['l2_reg'], 'train_acc': train_result[args.eval_metric][-1], 'val_acc': task_val_result[args.eval_metric][-1], 'test_acc': test_result[args.eval_metric][-1]})
 
             sgnn.restore_memory(train_memory_backup)
 
@@ -514,16 +483,16 @@ for rp in range(rp_times):
                     task_acc_vary[k][task]+=test_n_acc
                 break
             else:
-                if early_stopper[task].early_stop_check(val_result, sgnn, args.model, train_memory_backup, time_now, task, train_IB_backup, train_PGen_backup) or e == args.n_epoch - 1:
-                    logger.info('No improvement over {} epochs, stop training'.format(early_stopper[task].max_round))
-                    logger.info(f'Loading the best model at epoch {early_stopper[task].best_epoch}')
+                if early_stopper[task].early_stop_check(loss_dict['loss'], sgnn, args.model, train_memory_backup, time_now, task, train_IB_backup, train_PGen_backup) or e == args.n_epoch - 1:
+                    logger.info(f'Early stop at {early_stopper[task].max_round} epochs, loading the best model at epoch {early_stopper[task].best_epoch}')
+                    # logger.info(f'Loading the best model at epoch {early_stopper[task].best_epoch}')
                     best_model_path, _, _, _ = get_checkpoint_path(args.model, time_now, task, uml)
                     sgnn = torch.load(best_model_path)
                     sgnn.set_features(node_features, edge_features)
-                    logger.info(f'Loaded the best model at epoch {early_stopper[task].best_epoch} for inference')
+                    # logger.info(f'Loaded the best model at epoch {early_stopper[task].best_epoch} for inference')
                     sgnn.eval()
 
-                    sgnn.set_neighbor_finder(full_neighbor_finder)
+                    sgnn.set_neighbor_finder(test_neighbor_finder)
 
                     best_model_path, best_mem_path, best_IB_path, best_PGen_path = get_checkpoint_path(args.model, time_now, task, uml)
                     if args.memory_replay:
@@ -547,18 +516,18 @@ for rp in range(rp_times):
                     per_task_performance_matrix[task, :task+1] = np.array(task_test_result[args.eval_metric])
                     test_acc_record.append(test_result[args.eval_metric])
 
-                    # if args.model != 'Joint':
                     break   
         
             sgnn.set_features(node_features, edge_features)
             
         if hasattr(sgnn, "old_model"):
             sgnn.old_model = deepcopy(sgnn.model)
-        if args.memory_replay:
-            if args.select_mode == 'event_weight' and args.method == 'SubGraph':
-                sgnn.end_dataset(train_data[task], args, val_data[task])
-            else:
-                sgnn.end_dataset(train_data[task], args)
+
+        # if args.memory_replay:
+        #     if args.select_mode == 'event_weight' and args.method == 'SubGraph':
+        #         sgnn.end_dataset(train_data[task], args, val_data[task])
+        #     else:
+        #         sgnn.end_dataset(train_data[task], args)
 
     per_task_performance_matrix_str = np.array2string(per_task_performance_matrix, precision=2, separator='\t', suppress_small=True)
     per_task_performance_matrix_str = per_task_performance_matrix_str.replace('[', '').replace(']', '')
@@ -621,17 +590,8 @@ for i in range(args.num_datasets):
         task_acc_vary[i][j]/=rp_times
     f.write("task %d: "%(i)+str(task_acc_vary[i][i:]))
     f.write("\n")
-    # plt.plot(list(range(i,args.num_datasets)), task_acc_vary[i][i:], c=seaborn.xkcd_rgb[c_list[i]], marker='X', label='task%d'%(i))
-
-# plt.legend()
-# plt.savefig(Img_path)
-# plt.show()
 
 f.write("\n ========================= \n")
 f.close()
 
-# if args.debug_mode > 0:    
-    # Path("log/{}/{}/".format(args.model, time_now))
-    # print(os.path.exists("./log/{}/{}/".format(args.model, time_now)))
 shutil.rmtree("./log/{}/{}/".format(args.model, time_now))
-    # print(os.path.exists("./log/{}/{}/".format(args.model, time_now)))

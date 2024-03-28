@@ -94,8 +94,6 @@ class TemporalGNNClassifier(nn.Module):
         if self.multihead:
             # Create multiple MLP heads for each subset of classes
             self.head_layer = nn.ModuleList([Predictor(input_dim, args.head_hidden_dim, args.num_class_per_dataset, args.dropout) for i in range(args.num_datasets)])
-            for head in self.head_layer:
-                head.requires_grad_(False)
             # self.multihead_layer2 = nn.ModuleList([nn.Linear(args.head_hidden_dim, args.num_class_per_dataset) for i in range(args.num_datasets)])
         else:
             # Create a single MLP head for all classifications
@@ -124,15 +122,11 @@ class TemporalGNNClassifier(nn.Module):
         
         return src_embeddings, dst_embeddings
 
-    def forward(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None, src_avail_mask=None, dst_avail_mask=None, return_logits=False, return_emb_loss=False):
+    def forward(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None, return_logits=False, event_weight=None, return_emb_loss=False):
 
         # Get the embeddings
         if self.multihead:
-            for ds_id in range(dataset_idx + 1):
-                self.head_layer[ds_id].requires_grad_(True)
-
             cur_label_src = deepcopy(self.src_label[edges])
-            cur_label_dst = deepcopy(self.dst_label[edges])
 
             # src_embeddings, dst_embeddings = self.get_embeddings(src_nodes, dst_nodes, edges, edge_times, n_neighbors, candidate_weights_dict=candidate_weights_dict)
             src_embeddings, dst_embeddings = self.get_embeddings(src_nodes, dst_nodes, edges, edge_times, n_neighbors)
@@ -140,15 +134,12 @@ class TemporalGNNClassifier(nn.Module):
             # Pass the embeddings through the MLP heads
             if self.args.feature_type == 'embedded':
                 src_input_features = src_embeddings
-                dst_input_features = dst_embeddings
 
             elif self.args.feature_type == 'raw':
                 src_input_features = self.base_model.node_raw_features[src_nodes]
-                dst_input_features = self.base_model.node_raw_features[dst_nodes]
 
             elif self.args.feature_type == 'both':
                 src_input_features = torch.cat((src_embeddings, self.base_model.node_raw_features[src_nodes]), dim=1)
-                dst_input_features = torch.cat((dst_embeddings, self.base_model.node_raw_features[dst_nodes]), dim=1)
 
             # src_outputs = self.dropout(torch.relu(self.head_layer1(src_input_features)))
             # dst_outputs = self.dropout(torch.relu(self.head_layer1(dst_input_features)))
@@ -159,45 +150,45 @@ class TemporalGNNClassifier(nn.Module):
 
             for ds_id in range(self.num_heads):
                 src_ds_mask = (cur_label_src >= ds_id * self.num_class_per_dataset) & (cur_label_src < (ds_id + 1) * self.num_class_per_dataset)
-                dst_ds_mask = (cur_label_dst >= ds_id * self.num_class_per_dataset) & (cur_label_dst < (ds_id + 1) * self.num_class_per_dataset)
+                # dst_ds_mask = (cur_label_dst >= ds_id * self.num_class_per_dataset) & (cur_label_dst < (ds_id + 1) * self.num_class_per_dataset)
 
                 src_order.append(init_order[src_ds_mask])
-                dst_order.append(init_order[dst_ds_mask])
+                # dst_order.append(init_order[dst_ds_mask])
 
                 cur_label_src[src_ds_mask] = cur_label_src[src_ds_mask] - ds_id * self.num_class_per_dataset
-                cur_label_dst[dst_ds_mask] = cur_label_dst[dst_ds_mask] - ds_id * self.num_class_per_dataset
+                # cur_label_dst[dst_ds_mask] = cur_label_dst[dst_ds_mask] - ds_id * self.num_class_per_dataset
 
                 # src_preds.append(self.dropout(torch.relu(self.head_layer[ds_id](src_input_features[src_ds_mask]))))
                 # dst_preds.append(self.dropout(torch.relu(self.head_layer[ds_id](dst_input_features[dst_ds_mask]))))
                 src_preds.append(self.head_layer[ds_id](src_input_features[src_ds_mask]))
-                dst_preds.append(self.head_layer[ds_id](dst_input_features[dst_ds_mask]))
+                # dst_preds.append(self.head_layer[ds_id](dst_input_features[dst_ds_mask]))
 
             src_preds = torch.cat(src_preds, dim=0)
-            dst_preds = torch.cat(dst_preds, dim=0)
+            # dst_preds = torch.cat(dst_preds, dim=0)
 
             # change back the order
             src_order = torch.cat(src_order, dim=0)
-            dst_order = torch.cat(dst_order, dim=0)
+            # dst_order = torch.cat(dst_order, dim=0)
             src_order = (len(src_input_features) - src_order - 1)[torch.arange(len(src_input_features)-1, -1, -1)]
-            dst_order = (len(dst_input_features) - dst_order - 1)[torch.arange(len(dst_input_features)-1, -1, -1)]
+            # dst_order = (len(dst_input_features) - dst_order - 1)[torch.arange(len(dst_input_features)-1, -1, -1)]
 
             src_preds = src_preds[src_order]
-            dst_preds = dst_preds[dst_order]
+            # dst_preds = dst_preds[dst_order]
 
             if return_logits:
-                return src_preds, dst_preds
+                return src_preds
 
             loss_src = self.criterion(src_preds, cur_label_src)
-            loss_dst = self.criterion(dst_preds, cur_label_dst)
+            # loss_dst = self.criterion(dst_preds, cur_label_dst)
 
             if return_emb_loss:
-                return loss_src, loss_dst, src_embeddings, dst_embeddings
+                return loss_src, src_embeddings
 
-            if src_avail_mask is not None and dst_avail_mask is not None:
-                loss_src = loss_src[src_avail_mask]
-                loss_dst = loss_dst[dst_avail_mask]
+            if event_weight is not None:
+                loss_src = loss_src * event_weight
+                # loss_dst = loss_dst * event_weight
 
-            loss = loss_src.mean() + loss_dst.mean()
+            loss = loss_src.mean()
 
             return loss
         else:

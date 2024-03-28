@@ -19,3 +19,10 @@ TGNNEXPLAINER-PUBLIC/
 *.pyc
 *.ipynb_checkpoints
 
+*prev*
+*Prev*
+
+TGCL/*
+
+SubGraphCL/data/*
+

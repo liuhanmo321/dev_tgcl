@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import math
 
-from utils.utils import get_neighbor_finder
+from utils.utils import get_neighbor_sampler
 
 class IB(nn.Module): 
     def __init__(self, shape_x, shape_z, shape_y, label_src, label_dst, per_class, device, beta=0.3, dis_IB=False, ch_IB='m', n_task=6, lr=0.005):
@@ -258,9 +258,9 @@ class PGen(nn.Module):
             
             for c_task in range(self.n_task):
                 if self.pmethod == 'knn':
-                    test_neighbor_finder = get_neighbor_finder(full_data[c_task], False, mask=test_data[c_task])
+                    test_neighbor_finder = get_neighbor_sampler(full_data[c_task], 'recent', mask=test_data[c_task])
                 elif self.pmethod == 'tknn':
-                    test_neighbor_finder = get_neighbor_finder(full_data[c_task], True, mask=test_data[c_task])
+                    test_neighbor_finder = get_neighbor_sampler(full_data[c_task], 'uniform', mask=test_data[c_task])
                 bs = 300
                 num_batch = math.ceil(len(full_data[c_task].src) / bs)
                 for c_b in range(num_batch):

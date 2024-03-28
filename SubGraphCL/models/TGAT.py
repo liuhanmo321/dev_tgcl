@@ -18,8 +18,8 @@ class TGAN(torch.nn.Module):
         self.ngh_finder = ngh_finder
         self.null_idx = null_idx
         self.logger = logging.getLogger(__name__)
-        self.n_feat_th = torch.nn.Parameter(torch.from_numpy(n_feat.astype(np.float32)))
-        self.e_feat_th = torch.nn.Parameter(torch.from_numpy(e_feat.astype(np.float32)))
+        self.n_feat_th = torch.nn.Parameter(torch.from_numpy(n_feat.astype(np.float32))).requires_grad_(False)
+        self.e_feat_th = torch.nn.Parameter(torch.from_numpy(e_feat.astype(np.float32))).requires_grad_(False)
         # self.edge_raw_features = torch.nn.Embedding.from_pretrained(self.e_feat_th, padding_idx=0, freeze=True)
         # self.node_raw_features = torch.nn.Embedding.from_pretrained(self.n_feat_th, padding_idx=0, freeze=True)
         self.node_raw_features = torch.tensor(n_feat.astype(np.float32), requires_grad=False).to(device)
@@ -145,18 +145,18 @@ class TGAN(torch.nn.Module):
             mask = src_ngh_node_batch_th == 0
             attn_m = self.attn_model_list[curr_layers - 1]
 
-            if candidate_weights_dict is not None:
-                event_idxs = candidate_weights_dict['candidate_events']
-                event_weights = candidate_weights_dict['edge_weights']
+            # if candidate_weights_dict is not None:
+            #     event_idxs = candidate_weights_dict['candidate_events']
+            #     event_weights = candidate_weights_dict['edge_weights']
 
-                ###### version 1, event_weights not [0, 1]
-                position0 = src_ngh_node_batch_th == 0
-                mask = torch.zeros_like(src_ngh_node_batch_th).to(dtype=torch.float32) # NOTE: for +, 0 mean no influence
-                # import ipdb; ipdb.set_trace()
-                for i, e_idx in enumerate(event_idxs):
-                    indices = src_ngh_eidx_batch == e_idx
-                    mask[indices] = event_weights[i]
-                mask[position0] = -1e10 # addition attention, as 0 masks
+            #     ###### version 1, event_weights not [0, 1]
+            #     position0 = src_ngh_node_batch_th == 0
+            #     mask = torch.zeros_like(src_ngh_node_batch_th).to(dtype=torch.float32) # NOTE: for +, 0 mean no influence
+            #     # import ipdb; ipdb.set_trace()
+            #     for i, e_idx in enumerate(event_idxs):
+            #         indices = src_ngh_eidx_batch == e_idx
+            #         mask[indices] = event_weights[i]
+            #     mask[position0] = -1e10 # addition attention, as 0 masks
 
             local, weight = attn_m(src_node_conv_feat, 
                                    src_node_t_embed,
@@ -169,7 +169,15 @@ class TGAN(torch.nn.Module):
 
     def get_embeddings(self, src_idx_l, target_idx_l, edge_idxs, cut_time_l, negative_nodes=None, num_neighbors=20, candidate_weights_dict=None):
         src_embed = self.tem_conv(src_idx_l, cut_time_l, self.num_layers, num_neighbors, candidate_weights_dict=candidate_weights_dict)
-        target_embed = self.tem_conv(target_idx_l, cut_time_l, self.num_layers, num_neighbors, candidate_weights_dict=candidate_weights_dict)
+
+        if target_idx_l is None:
+            target_embed = None
+        else:
+            target_embed = self.tem_conv(target_idx_l, cut_time_l, self.num_layers, num_neighbors, candidate_weights_dict=candidate_weights_dict)
+        # if target_idx_l != None:
+        #     target_embed = self.tem_conv(target_idx_l, cut_time_l, self.num_layers, num_neighbors, candidate_weights_dict=candidate_weights_dict)
+        # else:
+        #     target_embed = None
         
         return src_embed, target_embed
     
