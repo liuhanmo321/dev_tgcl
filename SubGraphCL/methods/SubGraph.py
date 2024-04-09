@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import math
 from models.Backbone import TemporalGNNClassifier
 from copy import deepcopy
+from sklearn.cluster import KMeans
 # from methods.SubGraph_utils import local_rbf_kernel, select_prototypes
 # The following code is to initialize the class for finetune, which is a vanilla baseline in continual learning.
 # Please generate a template code for me.
@@ -576,7 +577,7 @@ class SubGraph(nn.Module):
                     edge_batch = past_train_data.edge_idxs[st_idx:ed_idx]
                     timestamp_batch = past_train_data.timestamps[st_idx:ed_idx]
                 
-                    src_loss, dst_loss, src_embeddings, dst_embeddings = self.model(src_batch, dst_batch, edge_batch, timestamp_batch, args.num_neighbors, None, return_emb_loss=True)
+                    src_loss, dst_loss, src_embeddings, dst_embeddings = self.model(src_batch, dst_batch, edge_batch, timestamp_batch, args.num_neighbors, task, return_emb_loss=True)
                     old_src_loss_bank.append(src_loss)
                     old_dst_loss_bank.append(dst_loss)
 
@@ -590,42 +591,94 @@ class SubGraph(nn.Module):
                 old_src_emb_bank = torch.cat(old_src_emb_bank, dim=0)
                 old_dst_emb_bank = torch.cat(old_dst_emb_bank, dim=0)
 
-            total_emb_bank = torch.cat([old_src_emb_bank, old_dst_emb_bank], dim=0)
-            total_idx_bank = torch.cat([torch.tensor(past_train_data.edge_idxs), torch.tensor(past_train_data.edge_idxs)], dim=0)
-            total_label_bank = torch.cat([torch.tensor(past_train_data.labels_src), torch.tensor(past_train_data.labels_dst)], dim=0)
+                total_emb_bank = torch.cat([old_src_emb_bank, old_dst_emb_bank], dim=0)
+                total_idx_bank = torch.cat([torch.tensor(past_train_data.edge_idxs), torch.tensor(past_train_data.edge_idxs)], dim=0)
+                total_label_bank = torch.cat([torch.tensor(past_train_data.labels_src), torch.tensor(past_train_data.labels_dst)], dim=0)
 
             for y in range(task * args.num_class_per_dataset):
-                print(len(total_label_bank))
                 y_mask = np.isin(total_label_bank, [y])
                 y_emb_bank = total_emb_bank[y_mask]
                 y_loss_bank = total_loss_bank[y_mask]
                 y_idx_bank = total_idx_bank[y_mask]
 
-                if len(y_emb_bank) > 10000:
-                    loss_choice = y_loss_bank.argsort()[:10000].cpu().numpy()
-                    y_emb_bank = y_emb_bank[loss_choice]
-                    y_idx_bank = y_idx_bank[loss_choice]
-                    y_loss_bank = y_loss_bank[loss_choice]
-                else:
-                    loss_choice = None
+                num_parts = int(len(y_emb_bank) / 10000) + 1
 
-                y_K = rbf_kernel(y_emb_bank)
+                selected_index = []
+                distribution_only_selected_index = []
 
-                # calculate the l2 distance between each input embedding and the selected_new_emb
-                if args.error_min_loss:
-                    temp_y_loss_bank = args.error_min_loss_weight * (y_loss_bank - y_loss_bank.min()) / (y_loss_bank.max() - y_loss_bank.min())
-                else:
-                    y_loss_bank = torch.zeros_like(y_loss_bank)
+                if self.args.partition == 'kmeans':
 
-                selected_mask = select_prototypes(y_K, temp_y_loss_bank, args.memory_size)
-                selected_index = y_idx_bank[selected_mask].unique()
+                    y_cluster_idx = KMeans(n_clusters=num_parts, random_state=0, n_init="auto").fit_predict(y_emb_bank.cpu().numpy())
+                    
+                    for cluster in range(num_parts):
+                        cluster_mask = y_cluster_idx == cluster
+                        cluster_emb = y_emb_bank[cluster_mask]
+                        cluster_loss = y_loss_bank[cluster_mask]
+                        cluster_idx = y_idx_bank[cluster_mask]
+                        
+                        cluster_K = rbf_kernel(cluster_emb)
+
+                        # calculate the l2 distance between each input embedding and the selected_new_emb
+                        if args.error_min_loss:
+                            temp_cluster_loss = args.error_min_loss_weight * (cluster_loss - cluster_loss.min()) / (cluster_loss.max() - cluster_loss.min())
+                        else:
+                            temp_cluster_loss = torch.zeros_like(cluster_loss)
+                        
+                        if args.error_min_distribution:
+                            selected_mask = select_prototypes(cluster_K, temp_cluster_loss, num_prototypes=int(args.memory_size / num_parts))
+                        elif args.error_min_loss:
+                            selected_mask = torch.topk(temp_cluster_loss, int(args.memory_size / num_parts), largest=False)[1]
+                        
+                        selected_index.append(cluster_idx[selected_mask].unique())
+                
+                elif self.args.partition == 'random':
+                    temp_idx = np.array(range(len(y_emb_bank)))
+                    np.random.shuffle(temp_idx)
+    
+                    # Calculate the number of elements in each part
+                    part_size = len(y_idx_bank) // num_parts
+                    # Split the data into parts
+                    partitions = [temp_idx[i*part_size:(i+1)*part_size] for i in range(num_parts)]
+
+                    for part in partitions:
+                        cluster_emb = y_emb_bank[part]
+                        cluster_loss = y_loss_bank[part]
+                        cluster_idx = y_idx_bank[part]
+
+                        cluster_K = rbf_kernel(cluster_emb)
+
+                        if args.error_min_loss:
+                            temp_cluster_loss = args.error_min_loss_weight * (cluster_loss - cluster_loss.min()) / (cluster_loss.max() - cluster_loss.min())
+                        else:
+                            temp_cluster_loss = torch.zeros_like(cluster_loss)
+
+                        if args.error_min_distribution:
+                            selected_mask = select_prototypes(cluster_K, temp_cluster_loss, num_prototypes=int(args.memory_size / num_parts))
+                        elif args.error_min_loss:
+                            selected_mask = torch.topk(temp_cluster_loss, int(args.memory_size / num_parts), largest=False)[1].cpu()
+                        
+                        if args.error_min_distill:
+                            distribution_only_selected_mask = select_prototypes(cluster_K, None, num_prototypes=int(args.memory_size / num_parts))
+                            distribution_only_selected_index.append(cluster_idx[distribution_only_selected_mask].unique())
+                        
+                        selected_index.append(cluster_idx[selected_mask].unique())
+                    
+                selected_index = torch.cat(selected_index)
                 selected_index_mask = torch.tensor([True if (idx in selected_index) else False for idx in past_train_data.edge_idxs])
             
                 cur_memory = Data(past_train_data.src[selected_index_mask], past_train_data.dst[selected_index_mask], past_train_data.timestamps[selected_index_mask], \
                                 past_train_data.edge_idxs[selected_index_mask], past_train_data.labels_src[selected_index_mask], past_train_data.labels_dst[selected_index_mask])
                 self.memory.update_memory(cur_memory)
+
+                if args.error_min_distill:
+                    distribution_only_selected_index = torch.cat(distribution_only_selected_index)
+                    distribution_only_selected_index_mask = torch.tensor([True if (idx in distribution_only_selected_index) else False for idx in past_train_data.edge_idxs])
+                    
+                    cur_memory = Data(past_train_data.src[distribution_only_selected_index_mask], past_train_data.dst[distribution_only_selected_index_mask], past_train_data.timestamps[distribution_only_selected_index_mask], \
+                                past_train_data.edge_idxs[distribution_only_selected_index_mask], past_train_data.labels_src[distribution_only_selected_index_mask], past_train_data.labels_dst[distribution_only_selected_index_mask])
+                    self.new_memory.update_memory(cur_memory)
                 
-                del y_K, y_emb_bank, y_idx_bank, y_loss_bank, selected_mask, selected_index_mask, selected_index
+                # del y_K, y_emb_bank, y_idx_bank, y_loss_bank, selected_mask, selected_index_mask, selected_index
             
             return new_mask, new_src_mask, new_dst_mask
 
@@ -646,6 +699,12 @@ class SubGraph(nn.Module):
             self.model.base_model.edge_raw_features = torch.from_numpy(edge_features.astype(np.float32)).to(self.args.device)
         else:
             self.model.base_model.edge_raw_features = None
+
+    def set_class_weight(self, class_weight):
+        if class_weight is not None:
+            self.model.criterion = nn.CrossEntropyLoss(weight=torch.tensor(class_weight).float().to(self.args.device), reduction='none')
+        else:
+            self.model.criterion = nn.CrossEntropyLoss(reduction='none')
 
     def reset_graph(self):
         return
@@ -832,7 +891,7 @@ def rbf_kernel(X:torch.Tensor, gamma:float=None):
     K = K.exp()
     return K
 
-def select_prototypes(K:torch.Tensor, loss = None, new_MMD = None, num_prototypes = 0):
+def select_prototypes(K:torch.Tensor, loss = None, num_prototypes = 0):
     sample_indices = torch.arange(0, K.shape[0])
     num_samples = sample_indices.shape[0]
 
@@ -854,8 +913,8 @@ def select_prototypes(K:torch.Tensor, loss = None, new_MMD = None, num_prototype
             s2 /= (selected.shape[0] + 1)
             s1 -= s2
         
-        if (loss is not None) and (new_MMD is not None):
-            s1 = s1 - loss[candidate_indices] - new_MMD[candidate_indices]
+        if (loss is not None):
+            s1 = s1 - loss[candidate_indices]
 
         best_sample_index = candidate_indices[s1.argmax()]
         is_selected[best_sample_index] = i + 1

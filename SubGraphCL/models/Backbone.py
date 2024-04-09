@@ -184,6 +184,14 @@ class TemporalGNNClassifier(nn.Module):
             src_preds = src_preds[src_order]
             dst_preds = dst_preds[dst_order]
 
+            if src_avail_mask is not None and dst_avail_mask is not None:
+                src_preds = src_preds[src_avail_mask]
+                dst_preds = dst_preds[dst_avail_mask]
+                cur_label_src = cur_label_src[src_avail_mask]
+                cur_label_dst = cur_label_dst[dst_avail_mask]
+                src_embeddings = src_embeddings[src_avail_mask]
+                dst_embeddings = dst_embeddings[dst_avail_mask]
+
             if return_logits:
                 return src_preds, dst_preds
 
@@ -193,9 +201,9 @@ class TemporalGNNClassifier(nn.Module):
             if return_emb_loss:
                 return loss_src, loss_dst, src_embeddings, dst_embeddings
 
-            if src_avail_mask is not None and dst_avail_mask is not None:
-                loss_src = loss_src[src_avail_mask]
-                loss_dst = loss_dst[dst_avail_mask]
+            # if src_avail_mask is not None and dst_avail_mask is not None:
+            #     loss_src = loss_src[src_avail_mask]
+            #     loss_dst = loss_dst[dst_avail_mask]
 
             loss = loss_src.mean() + loss_dst.mean()
 
@@ -231,6 +239,14 @@ class TemporalGNNClassifier(nn.Module):
             src_preds = src_preds[:, :cur_dataset_len]
             dst_preds = dst_preds[:, :cur_dataset_len]
 
+            if src_avail_mask is not None and dst_avail_mask is not None:
+                src_preds = src_preds[src_avail_mask]
+                dst_preds = dst_preds[dst_avail_mask]
+                cur_label_src = cur_label_src[src_avail_mask]
+                cur_label_dst = cur_label_dst[dst_avail_mask]
+                src_embeddings = src_embeddings[src_avail_mask]
+                dst_embeddings = dst_embeddings[dst_avail_mask]
+
             if return_logits:
                 return src_preds, dst_preds
             
@@ -240,9 +256,11 @@ class TemporalGNNClassifier(nn.Module):
             if return_emb_loss:
                 return loss_src, loss_dst, src_embeddings, dst_embeddings
             
-            loss = loss_src.mean() + loss_dst.mean()
-
-            return loss
+            if len(loss_src) == 0:
+                return torch.tensor(0.0).to(self.args.device)
+            else:
+                loss = loss_src.mean() + loss_dst.mean()
+                return loss
 
 
 

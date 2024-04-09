@@ -113,8 +113,8 @@ def eval_prediction(model, data, task, eval_task, bs, ch, uml, avg='edge', multi
 
             # print(f'num_evaluated for task {t}', len(task_label))
 
-            task_val_f1[t] = f1_score(task_label, task_pred, labels=[i for i in range(0, n_class)], average='weighted', zero_division=0)
-            task_val_ap[t] = precision_score(task_label, task_pred, labels=[i for i in range(0, n_class)], average='weighted', zero_division=0)
+            task_val_f1[t] = f1_score(task_label, task_pred, labels=[i for i in range(0, n_class)], average='macro', zero_division=0)
+            task_val_ap[t] = precision_score(task_label, task_pred, labels=[i for i in range(0, n_class)], average='macro', zero_division=0)
             task_val_acc[t] = torch.sum(task_pred == task_label).item() / len(task_label) * 100
 
         

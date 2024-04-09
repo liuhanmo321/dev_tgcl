@@ -8,16 +8,16 @@ from pathlib import Path
 # dataset = 'yelp'
 # dataset = 'taobao'
 
-for dataset in ['reddit', 'amazon']:
+for dataset in ['reddit']:
 # for dataset in ['amazon', 'reddit']:
 # for dataset in ['amazon', 'yelp', 'reddit']:
-    model = 'DyGFormer' 
-    # model = 'TGAT'
+    # model = 'DyGFormer' 
+    model = 'TGAT'
     method = 'SubGraph'
 
-    device = 7
+    device = 5
     rp_times = 3
-    debug_mode = 0
+    debug_mode = 1
 
     select = 'none' 
     Path("./result/").mkdir(parents=True, exist_ok=True)
@@ -33,31 +33,33 @@ for dataset in ['reddit', 'amazon']:
         lr=1e-4
         num_datasets=5        
         num_class_per_dataset=3
-        n_epoch=50
+        n_epoch=100
         # n_epoch=1
         bs = 400
         memory_size = 1000
     elif dataset=='reddit':
-        lr=5e-5
+        lr=1e-5
         num_datasets=3
         num_class_per_dataset=5
-        n_epoch = 50
+        n_epoch = 100
         bs = 600
         memory_size = 1000
     elif dataset=='amazon':
         lr=1e-5
         num_datasets=3
         num_class_per_dataset=3
-        n_epoch = 50
+        n_epoch = 100
         bs = 600
         memory_size = 1000
 
-    select_mode = 'random'
-    error_min_new_data = 1
+    select_mode = 'error_min'
+    error_min_distribution = 1
     error_min_loss = 1
-    error_min_distance_weight = 1.0
-    error_min_loss_weight = 1.0
-    error_min_new_data_kept_ratio = 0.1
+    # error_min_distance_weight = 1.0
+    error_min_loss_weight = 2.0
+    # error_min_new_data_kept_ratio = 0.1
+
+    partition = 'random'
 
     old_emb_distribution_distill = 0
     new_emb_distribution_distill = 1
@@ -69,7 +71,7 @@ for dataset in ['reddit', 'amazon']:
     weight_learning_method = 'pred_diff'
     weight_reg_method = 'acc'
 
-    eval_metric = 'acc'
+    eval_metric = 'ap'
 
     num_neighbors = 10
 
@@ -112,7 +114,7 @@ for dataset in ['reddit', 'amazon']:
     pattern_rho=0
     class_balance=1
     eval_avg='edge'
-    multihead=1
+    multihead=0
     feature_iter = 1
     patience = 20
     radius=0
@@ -181,16 +183,15 @@ for dataset in ['reddit', 'amazon']:
     cmd += " --weight_reg_method {}".format(weight_reg_method)
     cmd += " --similarity_function {}".format(similarity_function)
     cmd += " --eval_metric {}".format(eval_metric)
-    cmd += " --error_min_new_data {}".format(error_min_new_data)
+    cmd += " --error_min_distribution {}".format(error_min_distribution)
     cmd += " --error_min_loss {}".format(error_min_loss)
-    cmd += " --error_min_distance_weight {}".format(error_min_distance_weight)
     cmd += " --error_min_loss_weight {}".format(error_min_loss_weight)
-    cmd += " --error_min_new_data_kept_ratio {}".format(error_min_new_data_kept_ratio)
     cmd += " --old_emb_distribution_distill {}".format(old_emb_distribution_distill)
     cmd += " --new_emb_distribution_distill {}".format(new_emb_distribution_distill)
     cmd += " --emb_distribution_distill_weight {}".format(emb_distribution_distill_weight)
     cmd += " --reg_gamma {}".format(reg_gamma)
     cmd += " --multihead {}".format(multihead)
+    cmd += " --partition {}".format(partition)
     os.system(cmd)
 
 

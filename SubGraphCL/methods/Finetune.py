@@ -20,7 +20,7 @@ class Finetune(nn.Module):
     def forward(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None, src_avail_mask=None, dst_avail_mask=None):
         self.model.detach_memory()
         # if self.args.task == 'nodecls':
-        return self.forward_nodecls(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx)
+        return self.forward_nodecls(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx, src_avail_mask, dst_avail_mask)
 
     def forward_linkpred(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx):
         return
@@ -91,6 +91,9 @@ class Finetune(nn.Module):
 
     def end_dataset(self, train_data, args):
         return
+
+    def set_class_weight(self, class_weight):
+        self.model.criterion = nn.CrossEntropyLoss(weight=torch.tensor(class_weight).float().to(self.args.device), reduction='none')
 
     def reset_graph(self):
         return

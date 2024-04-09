@@ -43,7 +43,7 @@ class Joint(nn.Module):
                         l2_reg += torch.norm(param)
                 loss += self.args.l2_weight * l2_reg
 
-                data_dict['l2_reg'] = l2_reg.item()
+                data_dict['l2_reg'] = self.args.l2_weight * l2_reg.item()
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -90,6 +90,9 @@ class Joint(nn.Module):
             self.model.base_model.edge_raw_features = torch.from_numpy(edge_features.astype(np.float32)).to(self.args.device)
         else:
             self.model.base_model.edge_raw_features = None
+
+    def set_class_weight(self, class_weight):
+        self.model.criterion = nn.CrossEntropyLoss(weight=torch.tensor(class_weight).float().to(self.args.device), reduction='none')
 
     def reset_graph(self):
         return

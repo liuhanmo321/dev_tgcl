@@ -14,12 +14,14 @@ from pathlib import Path
 from methods import get_model
 
 from utils.data_processing import get_data, computer_time_statics, get_past_inductive_data
-from utils.utils import get_neighbor_sampler, RandEdgeSampler, EarlyStopMonitor
+from utils.utils import get_neighbor_sampler, RandEdgeSampler, EarlyStopMonitor, str2bool
 from utils.evaluation import eval_prediction
 from utils.log_and_checkpoints import set_logger, get_checkpoint_path, get_mid_model_path
 import matplotlib.pyplot as plt
 import seaborn
 from copy import deepcopy
+
+import wandb
 
 parser = argparse.ArgumentParser('TGCL')
 
@@ -53,18 +55,11 @@ parser.add_argument('--num_neighbors', type=int, default=5, help='Number of neig
 
 parser.add_argument('--supervision', type=str, default='supervised', help='Supervision type')
 parser.add_argument('--task', type=str, default='nodecls', help='Task type')
-parser.add_argument('--feature_type', type=str, default='both', help='The type of features used for node classification')
-
-# continual learning method parameters
-
-parser.add_argument('--multihead', type=int, default=0, help='whether to use multihead classifiers for each data set')
-parser.add_argument('--head_hidden_dim', type=int, default=100, help='Number of hidden dimensions of the head classifier')
-parser.add_argument('--num_layers', type=int, default=1, help='Number of TGNN layers')
-parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
+parser.add_argument('--feature_type', type=str, default='embedded', help='The type of features used for node classification')
 
 # Memory parameters
 
-parser.add_argument('--memory_replay', type=int, default=0, help='Use memory buffer or not')
+parser.add_argument('--memory_replay', type=str2bool, default=0, help='Use memory buffer or not')
 parser.add_argument('--select_mode', type=str, default='random', help='How to select the data into the memory')
 parser.add_argument('--memory_size', type=int, default=100, help='Size of memory buffer')
 parser.add_argument('--memory_frac', type=float, default=-1, help='Size of memory buffer')
@@ -73,6 +68,7 @@ parser.add_argument('--replay_select_mode', type=str, default='random', help='Ho
 parser.add_argument('--replay_size', type=int, default=100, help='The number of data to replay')
 
 parser.add_argument('--old_data_weight', type=float, default=1.0, help='The weight for the total old data loss')
+parser.add_argument('--partition', type=str, default='random', help='How to separate the data')
 
 # Learning based subgraph selection
 parser.add_argument('--mid_model_path', type=str, default='', help='The storage path for mid model parameters')
@@ -83,31 +79,33 @@ parser.add_argument('--event_weight_l1_weight', type=float, default=1.0, help='T
 parser.add_argument('--weight_learning_method', type=str, default='param_diff', help='The method for learning the weight')
 parser.add_argument('--weight_reg_method', type=str, default='l1', help='The method for regularizing the weight magnitude')
 
-parser.add_argument('--error_min_new_data', type=int, default=0, help='Whether to minimize the error with new data')
-parser.add_argument('--error_min_distance_weight', type=float, default=1.0, help='The weight during selection when using new data')
-parser.add_argument('--error_min_loss', type=int, default=0, help='Whether to minimize the error with the loss')
+parser.add_argument('--error_min_distribution', type=str2bool, default=True, help='Whether to minimize the error with distribution difference')
+# parser.add_argument('--error_min_distance_weight', type=float, default=1.0, help='The weight during selection when using new data')
+parser.add_argument('--error_min_loss', type=str2bool, default=True, help='Whether to minimize the error with the loss')
 parser.add_argument('--error_min_loss_weight', type=float, default=1.0, help='The weight during selection when using the loss')
-parser.add_argument('--error_min_new_data_kept_ratio', type=float, default=1.0, help='The ratio of new data kept during selection')
-parser.add_argument('--old_emb_distribution_distill', type=int, default=0, help='Whether to distill the old emb distribution')
+# parser.add_argument('--error_min_new_data_kept_ratio', type=float, default=1.0, help='The ratio of new data kept during selection')
+parser.add_argument('--error_min_distill', type=str2bool, default=True, help='Whether to require the distribution to be similar')
+
+parser.add_argument('--old_emb_distribution_distill', type=str2bool, default=0, help='Whether to distill the old emb distribution')
 # parser.add_argument('--old_emb_distribution_distill_weight', type=float, default=1.0, help='The weight for distilling the old emb distribution')
-parser.add_argument('--new_emb_distribution_distill', type=int, default=0, help='Whether to distill the new & old emb distribution')
+parser.add_argument('--new_emb_distribution_distill', type=str2bool, default=0, help='Whether to distill the new & old emb distribution')
 parser.add_argument('--emb_distribution_distill_weight', type=float, default=1.0, help='The weight for distilling the new & old emb distribution')
 parser.add_argument('--reg_gamma', type=float, default=0.1, help='The gamma value when calculating the kernel')
 
 # Distillation parameters
-parser.add_argument('--distill', type=int, default=0, help='Distill or not')
-parser.add_argument('--emb_distill', type=int, default=0, help='Distill embeddings or not')
+parser.add_argument('--distill', type=str2bool, default=0, help='Distill or not')
+parser.add_argument('--emb_distill', type=str2bool, default=0, help='Distill embeddings or not')
 parser.add_argument('--emb_distill_weight', type=float, default=1.0, help='The weight for distilling the embeddings')
-parser.add_argument('--emb_proj', type=int, default=0, help='Project new embeddings to the old emb space or not')
-parser.add_argument('--struct_distill', type=int, default=0, help='Distill the structural information or not')
+parser.add_argument('--emb_proj', type=str2bool, default=0, help='Project new embeddings to the old emb space or not')
+parser.add_argument('--struct_distill', type=str2bool, default=0, help='Distill the structural information or not')
 parser.add_argument('--struct_distill_weight', type=float, default=1.0, help='The weight for distilling the structural information')
 parser.add_argument('--similarity_function', type=str, default='cos', help='choose the similarity function')
-parser.add_argument('--future_neighbor', type=int, default=0, help='Whether to aggregate the future neighbors')
-parser.add_argument('--residual_distill', type=int, default=0, help='Whether to distill the distribution via a residual method')
+parser.add_argument('--future_neighbor', type=str2bool, default=0, help='Whether to aggregate the future neighbors')
+parser.add_argument('--residual_distill', type=str2bool, default=0, help='Whether to distill the distribution via a residual method')
 parser.add_argument('--distribution_measure', type=str, default='KLDiv', help='Which distribution measurement to use, KLDiv, MSE or CE')
-parser.add_argument('--emb_residual', type=int, default=0, help='Whether to distill the embeddings via residual method')
+parser.add_argument('--emb_residual', type=str2bool, default=0, help='Whether to distill the embeddings via residual method')
 
-parser.add_argument('--rand_neighbor', type=int, default=0, help='Whether to sample random neighbors instead of using past neighbors')
+parser.add_argument('--rand_neighbor', type=str2bool, default=0, help='Whether to sample random neighbors instead of using past neighbors')
 
 parser.add_argument('--temperature', type=float, default=2.0, help='Temperature for distillation')
 parser.add_argument('--ewc_weight', type=float, default=1.0, help='The weight for EWC loss')
@@ -129,14 +127,19 @@ parser.add_argument('--device_id', type=int, default=0, help='Device id of cuda'
 parser.add_argument('--device', type=str, default='cuda', help='cuda or cpu')
 parser.add_argument('--mem_size', type=int, default=10, help='Size of memory slots')
 parser.add_argument('--rp_times', type=int, default=1, help='repeat running times')
-parser.add_argument('--is_r', type=int, default=1, help='is_r')
-parser.add_argument('--blurry', type=int, default=1, help='blurry setting')
-parser.add_argument('--online', type=int, default=1, help='online setting')
-parser.add_argument('--use_IB', type=int, default=1, help='use IB')
-parser.add_argument('--dis_IB', type=int, default=1, help='dis IB')
+parser.add_argument('--is_r', type=str2bool, default=1, help='is_r')
+parser.add_argument('--blurry', type=str2bool, default=1, help='blurry setting')
+parser.add_argument('--online', type=str2bool, default=1, help='online setting')
+parser.add_argument('--use_IB', type=str2bool, default=1, help='use IB')
+parser.add_argument('--dis_IB', type=str2bool, default=1, help='dis IB')
 parser.add_argument('--ch_IB', type=str, default='m', help='ch IB')
 parser.add_argument('--pattern_rho', type=float, default=0.1, help='pattern_rho')
-parser.add_argument('--num_attn_heads', type=int, default=4, help='Number of attention heads')
+
+parser.add_argument('--multihead', type=str2bool, default=0, help='whether to use multihead classifiers for each data set')
+parser.add_argument('--head_hidden_dim', type=int, default=100, help='Number of hidden dimensions of the head classifier')
+parser.add_argument('--num_layers', type=int, default=2, help='Number of TGNN layers')
+parser.add_argument('--dropout', type=float, default=0.2, help='Dropout rate')
+parser.add_argument('--num_attn_heads', type=int, default=2, help='Number of attention heads')
 
 parser.add_argument('--l2_norm', type=bool, default=True, help='L2 norm')
 parser.add_argument('--l2_weight', type=float, default=0.001, help='L2 weight')
@@ -155,7 +158,7 @@ parser.add_argument('--patience', type=int, default=100, help='patience')
 parser.add_argument('--radius', type=float, default=0, help='radius')
 parser.add_argument('--beta', type=float, default=0, help='beta')
 parser.add_argument('--gamma', type=float, default=0, help='gamma')
-parser.add_argument('--uml', type=int, default=0, help='uml')
+parser.add_argument('--uml', type=str2bool, default=0, help='uml')
 parser.add_argument('--pmethod', type=str, default='knn', help='pseudo-label method')
 parser.add_argument('--sk', type=int, default=1000, help='number of triads candidates')
 parser.add_argument('--full_n', type=int, default=1, help='full_n')
@@ -169,53 +172,54 @@ parser.add_argument('--eval_avg', type=str, default='node', help='evaluation ave
 parser.add_argument('--results_dir', type=str, default='.', help='results diretion')
 parser.add_argument('--explainer_ckpt_dir', type=str, default='.', help='check point direction for the explainer')
 parser.add_argument('--eval_metric', type=str, default='acc', help='evaluation metric')
+parser.add_argument('--eval_scope', type=str, default='macro', help='the scope of the evaluation metric, macro or micro')
 
 
 log_to_file = True
 args = parser.parse_args()
 args.num_class = args.num_datasets * args.num_class_per_dataset
-n_interval = args.n_interval
-n_mc = args.n_mc
-args.memory_replay = args.memory_replay==1
-args.multihead = args.multihead==1
-use_feature = args.use_feature
-use_time = args.use_time
-blurry = args.blurry==1
-online = args.online==1
-is_r = args.is_r==1
+# n_interval = args.n_interval
+# n_mc = args.n_mc
+# args.memory_replay = args.memory_replay==1
+# args.multihead = args.multihead==1
+# use_feature = args.use_feature
+# use_time = args.use_time
+# blurry = args.blurry==1
+online = args.online
+# is_r = args.is_r==1
 mem_method = args.mem_method
 mem_size = args.mem_size
 rp_times = args.rp_times
-use_IB = args.use_IB==1
-dis_IB = args.dis_IB==1
+# use_IB = args.use_IB==1
+# dis_IB = args.dis_IB==1
 ch_IB = args.ch_IB
 pattern_rho = args.pattern_rho
-class_balance = args.class_balance
+# class_balance = args.class_balance
 eval_avg = args.eval_avg
-feature_iter=args.feature_iter==1
-patience=args.patience
-radius = args.radius
-beta = args.beta
-gamma = args.gamma
-uml = args.uml==1
-pmethod = args.pmethod
-sk = args.sk
-full_n = args.full_n==1
-recover = args.recover==1
+# feature_iter=args.feature_iter==1
+# patience=args.patience
+# radius = args.radius
+# beta = args.beta
+# gamma = args.gamma
+uml = args.uml
+# pmethod = args.pmethod
+# sk = args.sk
+# full_n = args.full_n==1
+# recover = args.recover==1
 
-args.distill = args.distill==1
-args.emb_distill = (args.emb_distill==1) and args.distill
-args.emb_proj = args.emb_proj==1
-args.struct_distill = args.struct_distill==1 and args.distill
-args.future_neighbor = args.future_neighbor==1
-args.residual_distill = args.residual_distill==1 and args.distill
-args.emb_residual = args.emb_residual==1
-args.rand_neighbor = args.rand_neighbor==1
+# args.distill = args.distill
+args.emb_distill = args.emb_distill and args.distill
+# args.emb_proj = args.emb_proj==1
+args.struct_distill = args.struct_distill and args.distill
+# args.future_neighbor = args.future_neighbor==1
+args.residual_distill = args.residual_distill and args.distill
+# args.emb_residual = args.emb_residual==1
+# args.rand_neighbor = args.rand_neighbor==1
 
-args.error_min_new_data = args.error_min_new_data==1
-args.error_min_loss = args.error_min_loss==1
-args.old_emb_distribution_distill = args.old_emb_distribution_distill==1 and args.distill
-args.new_emb_distribution_distill = args.new_emb_distribution_distill==1 and args.distill
+# args.error_min_new_data = args.error_min_new_data==1
+# args.error_min_loss = args.error_min_loss==1
+args.old_emb_distribution_distill = args.old_emb_distribution_distill and args.distill
+args.new_emb_distribution_distill = args.new_emb_distribution_distill and args.distill
 
 avg_time_cost = []
 avg_performance_all=[]
@@ -233,7 +237,16 @@ else:
     f = open("./result/{}.txt".format(args.dataset+args.filename_add),"a+")
 f.write("\n +++++++++++++++++++++++++++++++ \n")
 
+run_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime(time.time()))
+init_args = deepcopy(args)
+tags = [args.dataset, args.method, args.model]
+
 for rp in range(rp_times):
+    args = deepcopy(init_args)
+    if args.debug_mode == 0:
+        run = wandb.init(project="Temporal Graph Continual Learning", name=f"{args.dataset}_{args.method}_{args.model}_{run_time}", tags=tags)
+        wandb.config.update(args)
+
     per_task_performance = []
     per_task_performance_matrix = np.zeros((args.num_datasets, args.num_datasets))
 
@@ -253,7 +266,7 @@ for rp in range(rp_times):
 
     print(str(args))
     # data processing
-    node_features, edge_features, full_data, train_data, val_data, test_data, all_data, _, _ = get_past_inductive_data(args.dataset,args.num_datasets,args.num_class_per_dataset,blurry)
+    node_features, edge_features, full_data, train_data, val_data, test_data, all_data, _, _ = get_past_inductive_data(args.dataset,args.num_datasets,args.num_class_per_dataset, args.blurry)
     
     args.node_init_dim = node_features.shape[1]
     args.node_embedding_dim = node_features.shape[1]
@@ -301,7 +314,7 @@ for rp in range(rp_times):
     logger.debug("./result/{}.txt".format(args.dataset+args.filename_add))
     LOSS = []
     val_acc, val_ap, val_f1 = [], [], []
-    early_stopper = [EarlyStopMonitor(max_round=patience, higher_better=False) for i in range(args.num_datasets+1)]
+    early_stopper = [EarlyStopMonitor(max_round=args.patience, higher_better=True) for i in range(args.num_datasets+1)]
     test_best=[0 for i in range(args.num_datasets)]
 
     if not os.path.exists(f'./checkpoints/{args.model}/'):
@@ -343,23 +356,40 @@ for rp in range(rp_times):
         sgnn.set_neighbor_finder(train_neighbor_finder)
         cur_train_data = deepcopy(train_data[task])
 
+        selection_time = 0
         if hasattr(sgnn, 'begin_task') and task > 0:
+            begin_time = time.time()
+            if args.method == 'SubGraph':
+                sgnn.set_class_weight(None)
             train_avail_mask, train_src_avail_mask, train_dst_avail_mask = sgnn.begin_task(args, train_data[task], task)
+            selection_time = time.time() - begin_time
             cur_train_data.apply_mask(train_avail_mask, train_src_avail_mask, train_dst_avail_mask)
 
         # balance the weights for classes
-        class_weights = np.zeros((task + 1, args.num_class_per_dataset))
-        src_labels = train_data[task].labels_src
-        dst_labels = train_data[task].labels_dst
+        src_labels = cur_train_data.labels_src
+        dst_labels = cur_train_data.labels_dst
 
-        src_class_stat = np.unique(src_labels, return_counts=True)
-        dst_class_stat = np.unique(dst_labels, return_counts=True)
+        if task > 0:
+            src_labels = src_labels[cur_train_data.src_avail_mask]
+            dst_labels = dst_labels[cur_train_data.dst_avail_mask]
+
+            if hasattr(sgnn, 'memory'):
+                src_labels = np.concatenate([src_labels, sgnn.memory.get_full_data().labels_src])
+                dst_labels = np.concatenate([dst_labels, sgnn.memory.get_full_data().labels_dst])
+
+        class_stat = {i: 0 for i in range((task + 1) * args.num_class_per_dataset)}
+        class_count = np.unique(np.concatenate([src_labels, dst_labels]), return_counts=True)
+        for i, key in enumerate(class_count[0]):
+            class_stat[key] += class_count[1][i]
+        class_stat = list(class_stat.values())
+        class_weight = np.array([np.sum(class_stat) / len(class_count[1]) / v if v > 0 else 1 for v in class_stat])
+
+        sgnn.set_class_weight(class_weight)
 
         # print('current full training data class stat:', src_class_stat)
-        # print('available training data class stat: ', np.unique(cur_train_data.labels_src[cur_train_data.src_avail_mask], return_counts=True))
-        # print('available training data class stat: ', np.unique(cur_train_data.labels_dst[cur_train_data.dst_avail_mask], return_counts=True))
+        print('available training data class stat: ', class_stat)
 
-        # print('available testing data class stat: ', np.unique(test_data[task].labels_src, return_counts=True))
+        print('available training data class weight: ', class_weight)
                 
         epoch_bar = tqdm(range(args.n_epoch), desc='Epoch', position=1, leave=True)
         for e in epoch_bar:
@@ -469,7 +499,17 @@ for rp in range(rp_times):
             # print(f"train_{args.eval_metric}: {train_result[args.eval_metric][-1]:.2f}  val_{args.eval_metric}: {avg_val_result[args.eval_metric]:.2f}   test_{args.eval_metric}: {avg_test_result[args.eval_metric]:.2f}")
             logger.debug(f"train_{args.eval_metric}: {train_result[args.eval_metric][-1]:.2f}  val_{args.eval_metric}: {avg_val_result[args.eval_metric]:.2f}   test_{args.eval_metric}: {avg_test_result[args.eval_metric]:.2f}")
 
-            epoch_bar.set_postfix({'loss': loss_dict['loss'], 'l2_reg': loss_dict['l2_reg'], 'train_acc': train_result[args.eval_metric][-1], 'val_acc': task_val_result[args.eval_metric][-1], 'test_acc': test_result[args.eval_metric][-1]})
+            epoch_bar.set_postfix({'loss': loss_dict['loss'], 'l2_reg': loss_dict['l2_reg'], f'train_{args.eval_metric}': train_result[args.eval_metric][-1], f'val_{args.eval_metric}': task_val_result[args.eval_metric][-1], f'test_{args.eval_metric}': test_result[args.eval_metric][-1]})
+            if args.debug_mode == 0:
+                log_dict = {f'loss_period{task+1}': loss_dict['loss'], f'l2_reg_period{task+1}': loss_dict['l2_reg'], 'epoch': e, 'period': task+1}
+                for metric in ['acc', 'ap', 'f1']:
+                    for t in range(task+1):
+                        log_dict[f'train_{metric}_task{t+1}_period{task+1}'] = train_result[metric][t]
+                        log_dict[f'val_{metric}_task{t+1}_period{task+1}'] = task_val_result[metric][t]
+                        log_dict[f'test_{metric}_task{t+1}_period{task+1}'] = test_result[metric][t]
+                    log_dict[f'avg_val_{metric}_period{task+1}'] = avg_val_result[metric]
+                    log_dict[f'avg_test_{metric}_period{task+1}'] = avg_test_result[metric]
+                wandb.log(log_dict)
 
             sgnn.restore_memory(train_memory_backup)
 
@@ -483,7 +523,7 @@ for rp in range(rp_times):
                     task_acc_vary[k][task]+=test_n_acc
                 break
             else:
-                if early_stopper[task].early_stop_check(loss_dict['loss'], sgnn, args.model, train_memory_backup, time_now, task, train_IB_backup, train_PGen_backup) or e == args.n_epoch - 1:
+                if early_stopper[task].early_stop_check(val_result, sgnn, args.model, train_memory_backup, time_now, task, train_IB_backup, train_PGen_backup) or e == args.n_epoch - 1:
                     logger.info(f'Early stop at {early_stopper[task].max_round} epochs, loading the best model at epoch {early_stopper[task].best_epoch}')
                     # logger.info(f'Loading the best model at epoch {early_stopper[task].best_epoch}')
                     best_model_path, _, _, _ = get_checkpoint_path(args.model, time_now, task, uml)
@@ -529,6 +569,10 @@ for rp in range(rp_times):
         #     else:
         #         sgnn.end_dataset(train_data[task], args)
 
+        if args.debug_mode == 0:
+            # wandb.log({'final_avg_performance': test_acc_record[-1], 'period': (task + 1)})
+            wandb.log({'final_avg_performance': test_acc_record[-1], 'final_avg_f1': test_result['f1'], 'final_avg_ap': test_result['ap'], 'final_avg_acc': test_result['acc'], 'period': (task + 1), 'selection_time': selection_time})
+
     per_task_performance_matrix_str = np.array2string(per_task_performance_matrix, precision=2, separator='\t', suppress_small=True)
     per_task_performance_matrix_str = per_task_performance_matrix_str.replace('[', '').replace(']', '')
     print('Performance List: ', test_acc_record)
@@ -556,6 +600,9 @@ for rp in range(rp_times):
     f.write("all_time: "+str(all_time/3600))
     f.write("\n")
 
+    if args.debug_mode == 0:
+        run.finish()
+
 f.write(str(args))
 f.write("\n")
 f.write(time_now)
@@ -567,7 +614,7 @@ f.write(f"Backbone:{args.model}, Method:{args.method}\n")
 f.write(f"Select Mode:{args.select_mode}, Memory Size:{args.memory_size}, Memory Weight:{args.old_data_weight}\n")
 f.write(f"Distill:{args.distill}, Old Dist Distill:{args.old_emb_distribution_distill}, New Dist Distill:{args.new_emb_distribution_distill}\n")
 f.write(f"Dist Distill Weight:{args.emb_distribution_distill_weight}, Reg Gamma:{args.reg_gamma}, \n")
-f.write(f"Error Min Loss:{args.error_min_loss}, Error Min Loss Weight:{args.error_min_loss_weight}, Error Min New Data:{args.error_min_new_data}, Error Min New Data Weight:{args.error_min_distance_weight}, Error Min New Data Kept Ratio:{args.error_min_new_data_kept_ratio}\n")
+f.write(f"Error Min Loss:{args.error_min_loss}, Error Min Loss Weight:{args.error_min_loss_weight}, Error Min Distribution:{args.error_min_distribution}\n")
 f.write(f"Emb Distill:{args.emb_distill}, Struct Distill:{args.struct_distill}, Emb Proj:{args.emb_proj}, Residual Distill:{args.residual_distill}, Rand Neighbor:{args.rand_neighbor}\n")
 f.write(f"Emb Distill Weight:{args.emb_distill_weight}, Struct Distill Weight:{args.struct_distill_weight}, Similarity Function:{args.similarity_function}, Distribution Measure:{args.distribution_measure}\n")
 f.write(f"Weight Learning Method:{args.weight_learning_method}, Weight Reg Method:{args.weight_reg_method}, Weight Training Epoch:{args.event_weight_epochs}\n")

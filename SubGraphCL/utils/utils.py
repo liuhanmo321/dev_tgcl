@@ -6,6 +6,16 @@ from utils.log_and_checkpoints import get_checkpoint_path
 
 from models.DyGLib.utils.utils import NeighborSampler
 
+def str2bool(v):
+    if isinstance(v, bool):
+       return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 class EarlyStopMonitor(object):
     def __init__(self, max_round=3, higher_better=True, tolerance=1e-10):
         self.max_round = max_round

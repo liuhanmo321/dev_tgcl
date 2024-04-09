@@ -70,8 +70,15 @@ def get_past_inductive_data(DatasetName, n_task, n_class, blurry):
 
     tmp_all_data = None
 
+    if DatasetName == "reddit":
+        prefix = "./data/{}_20day_200d_past_inductive_".format(DatasetName)
+    elif DatasetName == 'amazon':
+        prefix = "./data/{}_24day_200d_past_inductive_".format(DatasetName)
+    elif DatasetName == 'yelp':
+        prefix = "./data/{}_past_inductive_".format(DatasetName)
+
     for i in range(n_task):
-        tmp_full_graph = pd.read_csv("./data/{}_past_inductive_{}.csv".format(DatasetName, i))
+        tmp_full_graph = pd.read_csv("{}{}.csv".format(prefix, i))
 
         full_data.append(tmp_full_graph)
 
