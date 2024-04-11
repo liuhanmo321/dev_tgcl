@@ -123,153 +123,90 @@ class SubGraph(nn.Module):
 
             if is_old_data:
                 # print("old data replayed")
-                loss = self.model(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx)
+                # loss = self.model(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx)
+
+                loss_src, loss_dst, src_emb, dst_emb = self.model(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx, return_emb_loss=True)
+
+                loss = loss_src.mean() + loss_dst.mean()
                 
                 if self.args.distill:
-                    with torch.no_grad():
-                        old_src_emb, old_dst_emb = self.old_model.get_embeddings(src_nodes, dst_nodes, edges, edge_times, n_neighbors)
+                    # with torch.no_grad():
+                    #     old_src_emb, old_dst_emb = self.old_model.get_embeddings(src_nodes, dst_nodes, edges, edge_times, n_neighbors)
                     
-                    new_src_emb, new_dst_emb = self.model.get_embeddings(src_nodes, dst_nodes, edges, edge_times, n_neighbors)
+                    # new_src_emb, new_dst_emb = self.model.get_embeddings(src_nodes, dst_nodes, edges, edge_times, n_neighbors)
 
-                    if self.args.old_emb_distribution_distill:
-                        # print("distill old")
-                        total_new_emb, total_old_emb = torch.cat([new_src_emb, new_dst_emb], dim=0), torch.cat([old_src_emb, old_dst_emb], dim=0)
-                        old_distribution_kernel = rbf_kernel(torch.cat([total_new_emb, total_old_emb], dim=0), gamma=self.args.reg_gamma)
-                        n, m = len(total_new_emb), len(total_old_emb)
-                        XX = old_distribution_kernel[:n, :n]
-                        YY = old_distribution_kernel[n:, n:]
-                        XY = old_distribution_kernel[:n, n:]
-                        YX = old_distribution_kernel[n:, :n]
+                    # if self.args.old_emb_distribution_distill:
+                    #     # print("distill old")
+                    #     total_new_emb, total_old_emb = torch.cat([new_src_emb, new_dst_emb], dim=0), torch.cat([old_src_emb, old_dst_emb], dim=0)
+                    #     old_distribution_kernel = rbf_kernel(torch.cat([total_new_emb, total_old_emb], dim=0), gamma=self.args.reg_gamma)
+                    #     n, m = len(total_new_emb), len(total_old_emb)
+                    #     XX = old_distribution_kernel[:n, :n]
+                    #     YY = old_distribution_kernel[n:, n:]
+                    #     XY = old_distribution_kernel[:n, n:]
+                    #     YX = old_distribution_kernel[n:, :n]
 
-                        XX = torch.div(XX, n * n).sum(dim=1).view(1,-1)  # Source<->Source
-                        XY = torch.div(XY, -n * m).sum(dim=1).view(1,-1) # Source<->Target
+                    #     XX = torch.div(XX, n * n).sum(dim=1).view(1,-1)  # Source<->Source
+                    #     XY = torch.div(XY, -n * m).sum(dim=1).view(1,-1) # Source<->Target
 
-                        YX = torch.div(YX, -m * n).sum(dim=1).view(1,-1) #Target<->Source
-                        YY = torch.div(YY, m * m).sum(dim=1).view(1,-1)  # Target<->Target
+                    #     YX = torch.div(YX, -m * n).sum(dim=1).view(1,-1) #Target<->Source
+                    #     YY = torch.div(YY, m * m).sum(dim=1).view(1,-1)  # Target<->Target
                             
-                        old_distribution_loss = (XX + XY).sum() + (YX + YY).sum()
-                        # old_distribution_loss = torch.mean(XX + YY - XY -YX)
-                        loss += old_distribution_loss * self.args.emb_distribution_distill_weight
-                        data_dict['old_distribution_loss'] = old_distribution_loss.item()
+                    #     old_distribution_loss = (XX + XY).sum() + (YX + YY).sum()
+                    #     # old_distribution_loss = torch.mean(XX + YY - XY -YX)
+                    #     loss += old_distribution_loss * self.args.emb_distribution_distill_weight
+                    #     data_dict['old_distribution_loss'] = old_distribution_loss.item()
                     
-                    if self.args.new_emb_distribution_distill:
-                        print("distill new")
-                        temp_src_nodes, temp_dst_nodes, temp_edges, temp_edge_times = self.new_memory.get_data(self.args.batch_size)
-                        temp_new_src_emb, temp_new_dst_emb = self.model.get_embeddings(temp_src_nodes, temp_dst_nodes, temp_edges, temp_edge_times, n_neighbors)
-                        
-                        total_new_emb, total_temp_new_emb = torch.cat([new_src_emb, new_dst_emb], dim=0), torch.cat([temp_new_src_emb, temp_new_dst_emb], dim=0)
+                    if self.args.error_min_distill:
+                        print("distribution regularization")
+                        cur_labels = torch.cat([self.model.src_label[edges], self.model.dst_label[edges]], dim=0)
+                        cur_emb = torch.cat([src_emb, dst_emb], dim=0)
 
-                        new_distribution_kernel = rbf_kernel(torch.cat([total_new_emb, total_temp_new_emb], dim=0), gamma=self.args.reg_gamma)
-                        n, m = len(total_new_emb), len(total_temp_new_emb)
-                        XX = new_distribution_kernel[:n, :n]
-                        YY = new_distribution_kernel[n:, n:]
-                        XY = new_distribution_kernel[:n, n:]
-                        YX = new_distribution_kernel[n:, :n]
+                        # unique_labels = np.unique(cur_labels)
+                        unique_labels = torch.unique(cur_labels)
 
-                        XX = torch.div(XX, n * n).sum(dim=1).view(1,-1)  # Source<->Source
-                        XY = torch.div(XY, -n * m).sum(dim=1).view(1,-1) # Source<->Target
+                        temp_src_nodes, temp_dst_nodes, temp_edges, temp_edge_times = self.new_memory.get_full_data()
+                        temp_src_labels = self.model.src_label[temp_edges]
+                        temp_dst_labels = self.model.dst_label[temp_edges]
+                        # temp_labels = torch.cat([self.model.src_label[temp_edges], self.model.dst_label[temp_edges]], dim=0)
 
-                        YX = torch.div(YX, -m * n).sum(dim=1).view(1,-1) #Target<->Source
-                        YY = torch.div(YY, m * m).sum(dim=1).view(1,-1)  # Target<->Target
-                            
-                        new_distribution_loss = (XX + XY).sum() + (YX + YY).sum()
-                        loss += new_distribution_loss * self.args.emb_distribution_distill_weight
-                        data_dict['new_distribution_loss'] = new_distribution_loss.item()
+                        distribution_loss = 0
+                        for label in unique_labels:
+                            if label >= dataset_idx * self.args.num_class_per_dataset:
+                                continue
+                            cur_mask = cur_labels == label
+                            temp_src_mask = temp_src_labels == label
+                            temp_dst_mask = temp_dst_labels == label
+                            temp_mask = (temp_src_mask | temp_dst_mask).cpu()
 
-                    if self.args.emb_proj:
-                        new_src_emb = self.emb_projector(new_src_emb)
-                        new_dst_emb = self.emb_projector(new_dst_emb)
-                    
-                    if self.args.emb_distill:
-                        emb_distill_loss = - self.similarity(new_src_emb, old_emb=old_src_emb, weight=None) - self.similarity(new_dst_emb, old_emb=old_dst_emb, weight=None)
-                        emb_distill_loss = emb_distill_loss / 2
+                            # print(label)
+                            # print(torch.unique(temp_src_labels[temp_src_mask[temp_mask]]))
 
-                        loss += emb_distill_loss * self.args.emb_distill_weight
-                        data_dict['emb_distill_loss'] = emb_distill_loss.item()
-
-                    if self.args.struct_distill:
-                        if self.args.rand_neighbor:
-                            src_rand_neighbors, dst_rand_neighbors = [], []
-                            for _ in range(n_neighbors):
-                                sample_results = self.rand_sampler.sample(len(src_nodes))
-                                src_rand_neighbors.append(sample_results[0]), dst_rand_neighbors.append(sample_results[1])
-                            src_ngh_node_batch, dst_ngh_node_batch = np.array(src_rand_neighbors).T, np.array(dst_rand_neighbors).T
-
-                            print(src_ngh_node_batch.shape)
-                            tmp_edge_times = np.repeat(edge_times.reshape(-1, 1), n_neighbors, axis=-1)
-
-                            src_ngh_mask = src_ngh_node_batch == 0
-                            dst_ngh_mask = dst_ngh_node_batch == 0
-
-                            src_ngh_node_batch_flat = src_ngh_node_batch.flatten().astype('int64')  #reshape(batch_size, -1)
-                            src_ngh_t_batch_flat = tmp_edge_times.flatten().astype('int64')  #reshape(batch_size, -1)
-                            dst_ngh_node_batch_flat = dst_ngh_node_batch.flatten().astype('int64')  #reshape(batch_size, -1)
-                            dst_ngh_t_batch_flat = tmp_edge_times.flatten().astype('int64')  #reshape(batch_size, -1)
-                            
-                            # print("source neightbor node batch flat shape:", src_ngh_node_batch_flat.shape)
                             with torch.no_grad():
-                                old_src_ngh_embs, _ = self.old_model.get_embeddings(src_ngh_node_batch_flat, None, None, src_ngh_t_batch_flat, n_neighbors)
-                                old_dst_ngh_embs, _ = self.old_model.get_embeddings(dst_ngh_node_batch_flat, None, None, dst_ngh_t_batch_flat, n_neighbors)
+                                temp_src_emb, temp_dst_emb = self.model.get_embeddings(temp_src_nodes[temp_mask], temp_dst_nodes[temp_mask], temp_edges[temp_mask], temp_edge_times[temp_mask], n_neighbors)
+                            temp_emb = torch.cat([temp_src_emb, temp_dst_emb], dim=0)
 
-                            new_src_ngh_embs, _ = self.model.get_embeddings(src_ngh_node_batch_flat, None, None, src_ngh_t_batch_flat, n_neighbors)
-                            new_dst_ngh_embs, _ = self.model.get_embeddings(dst_ngh_node_batch_flat, None, None, dst_ngh_t_batch_flat, n_neighbors)
+                            temp_mask = torch.cat([self.model.src_label[temp_edges[temp_mask]], self.model.dst_label[temp_edges[temp_mask]]], dim=0) == label
+                            temp_emb = temp_emb[temp_mask]
 
-                        else:
-                            src_ngh_node_batch, src_ngh_edge_batch, src_ngh_t_batch = self.model.neighbor_finder.get_temporal_neighbor(src_nodes, edge_times, n_neighbors, find_future=False)
-                            dst_ngh_node_batch, dst_ngh_edge_batch, dst_ngh_t_batch = self.model.neighbor_finder.get_temporal_neighbor(dst_nodes, edge_times, n_neighbors, find_future=False)
-                            
-                            src_ngh_mask = src_ngh_node_batch == 0
-                            dst_ngh_mask = dst_ngh_node_batch == 0
+                            print(label, len(temp_emb))
 
-                            src_ngh_node_batch_flat = src_ngh_node_batch.flatten().astype('int64')  #reshape(batch_size, -1)
-                            src_ngh_t_batch_flat = src_ngh_t_batch.flatten().astype('int64')  #reshape(batch_size, -1)
-                            dst_ngh_node_batch_flat = dst_ngh_node_batch.flatten().astype('int64')  #reshape(batch_size, -1)
-                            dst_ngh_t_batch_flat = dst_ngh_t_batch.flatten().astype('int64')  #reshape(batch_size, -1)
-                            
-                            with torch.no_grad():
-                                old_src_ngh_embs, _ = self.old_model.get_embeddings(src_ngh_node_batch_flat, None, src_ngh_edge_batch, src_ngh_t_batch_flat, n_neighbors)
-                                old_dst_ngh_embs, _ = self.old_model.get_embeddings(dst_ngh_node_batch_flat, None, dst_ngh_edge_batch, dst_ngh_t_batch_flat, n_neighbors)
+                            new_distribution_kernel = rbf_kernel(torch.cat([cur_emb[cur_mask], temp_emb], dim=0), gamma=self.args.reg_gamma)
+                            n, m = len(cur_emb[cur_mask]), len(temp_emb)
+                            XX = new_distribution_kernel[:n, :n]
+                            YY = new_distribution_kernel[n:, n:]
+                            XY = new_distribution_kernel[:n, n:]
+                            YX = new_distribution_kernel[n:, :n]
 
-                            new_src_ngh_embs, _ = self.model.get_embeddings(src_ngh_node_batch_flat, None, src_ngh_edge_batch, src_ngh_t_batch_flat, n_neighbors)
-                            new_dst_ngh_embs, _ = self.model.get_embeddings(dst_ngh_node_batch_flat, None, dst_ngh_edge_batch, dst_ngh_t_batch_flat, n_neighbors)
+                            XX = torch.div(XX, n * n).sum(dim=1).view(1,-1)  # Source<->Source
+                            XY = torch.div(XY, -n * m).sum(dim=1).view(1,-1) # Source<->Target
 
-
-                        if self.args.emb_proj:
-                            new_src_ngh_embs = self.emb_projector(new_src_ngh_embs)
-                            new_dst_ngh_embs = self.emb_projector(new_dst_ngh_embs)
-
-                        old_src_ngh_embs = old_src_ngh_embs.view(src_ngh_node_batch.shape[0], n_neighbors, -1)
-                        old_dst_ngh_embs = old_dst_ngh_embs.view(dst_ngh_node_batch.shape[0], n_neighbors, -1)
-                        new_src_ngh_embs = new_src_ngh_embs.view(src_ngh_node_batch.shape[0], n_neighbors, -1)
-                        new_dst_ngh_embs = new_dst_ngh_embs.view(dst_ngh_node_batch.shape[0], n_neighbors, -1)
-
-                        old_src_emb = old_src_emb.view(old_src_emb.shape[0], 1, -1)
-                        old_dst_emb = old_dst_emb.view(old_dst_emb.shape[0], 1, -1)
-                        new_src_emb = new_src_emb.view(new_src_emb.shape[0], 1, -1)
-                        new_dst_emb = new_dst_emb.view(new_dst_emb.shape[0], 1, -1)
+                            YX = torch.div(YX, -m * n).sum(dim=1).view(1,-1) #Target<->Source
+                            YY = torch.div(YY, m * m).sum(dim=1).view(1,-1)  # Target<->Target
+                                
+                            distribution_loss += (XX + XY).sum() + (YX + YY).sum()
                         
-                        old_src_similarity = self.similarity(old_src_emb, ngh_emb=old_src_ngh_embs, mask=src_ngh_mask)
-                        old_dst_similarity = self.similarity(old_dst_emb, ngh_emb=old_dst_ngh_embs, mask=dst_ngh_mask)
-                        new_src_similarity = self.similarity(new_src_emb, ngh_emb=new_src_ngh_embs, mask=src_ngh_mask)
-                        new_dst_similarity = self.similarity(new_dst_emb, ngh_emb=new_dst_ngh_embs, mask=dst_ngh_mask)
-
-                        if self.args.residual_distill:
-                            # print("using redisual distill")
-                            new_src_residual = self.residual_projector(new_src_emb, new_src_similarity)
-                            new_dst_residual = self.residual_projector(new_dst_emb, new_dst_similarity)
-
-                            new_src_similarity = new_src_similarity + new_src_residual
-                            new_dst_similarity = new_dst_similarity + new_dst_residual
-
-                        # The order of KLDivLoss can be reversed
-                        src_struct_loss = self.distribution_difference(new_src_similarity, old_src_similarity)
-                        dst_struct_loss = self.distribution_difference(new_dst_similarity, old_dst_similarity)
-                        
-                        struct_distill_loss = (src_struct_loss.mean() + dst_struct_loss.mean()) / 2
-
-                        loss += struct_distill_loss * self.args.struct_distill_weight
-
-                        data_dict['struct_distill_loss'] = struct_distill_loss.item()
+                        loss += distribution_loss * self.args.emb_distribution_distill_weight
+                        data_dict['dist_reg'] = distribution_loss.item() * self.args.emb_distribution_distill_weight
 
                 loss = loss * self.args.old_data_weight
                 data_dict['loss'] = loss.item()
@@ -658,6 +595,7 @@ class SubGraph(nn.Module):
                             selected_mask = torch.topk(temp_cluster_loss, int(args.memory_size / num_parts), largest=False)[1].cpu()
                         
                         if args.error_min_distill:
+                            # print("data selected for distillation")
                             distribution_only_selected_mask = select_prototypes(cluster_K, None, num_prototypes=int(args.memory_size / num_parts))
                             distribution_only_selected_index.append(cluster_idx[distribution_only_selected_mask].unique())
                         
@@ -805,8 +743,12 @@ class Memory(nn.Module):
             return self.total_memory.src[idx], self.total_memory.dst[idx], self.total_memory.edge_idxs[idx], self.total_memory.timestamps[idx]
         
     def get_full_data(self):
-        return self.total_memory
+        return self.total_memory.src, self.total_memory.dst, self.total_memory.edge_idxs, self.total_memory.timestamps
+        # return self.total_memory
 
+    def get_memory(self):
+        return self.total_memory
+    
     def set_memory(self, memory):
         self.total_memory = memory
     

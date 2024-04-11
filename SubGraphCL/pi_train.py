@@ -374,8 +374,8 @@ for rp in range(rp_times):
             dst_labels = dst_labels[cur_train_data.dst_avail_mask]
 
             if hasattr(sgnn, 'memory'):
-                src_labels = np.concatenate([src_labels, sgnn.memory.get_full_data().labels_src])
-                dst_labels = np.concatenate([dst_labels, sgnn.memory.get_full_data().labels_dst])
+                src_labels = np.concatenate([src_labels, sgnn.memory.get_memory().labels_src])
+                dst_labels = np.concatenate([dst_labels, sgnn.memory.get_memory().labels_dst])
 
         class_stat = {i: 0 for i in range((task + 1) * args.num_class_per_dataset)}
         class_count = np.unique(np.concatenate([src_labels, dst_labels]), return_counts=True)
@@ -400,7 +400,7 @@ for rp in range(rp_times):
             logger.debug('task {} , start {} epoch'.format(task,e))
 
             # loss_value = 0
-            loss_dict = {'loss': 0, 'l2_reg': 0}
+            loss_dict = {'loss': 0, 'l2_reg': 0, 'dist_reg': 0}
             Reward = 0
             sgnn.reset_graph()
             sgnn.set_neighbor_finder(train_neighbor_finder)
@@ -409,7 +409,7 @@ for rp in range(rp_times):
             # Learn the selected data first
             num_batch_old = 0
             if hasattr(sgnn, 'memory') and task > 0 and args.memory_replay:
-                memory_data = sgnn.memory.get_full_data()
+                memory_data = sgnn.memory.get_memory()
                 num_batch_old = math.ceil(len(memory_data.src) / args.batch_size)
                 
                 for i in range(num_batch_old):
@@ -423,8 +423,12 @@ for rp in range(rp_times):
 
                     data_dict = sgnn(src_batch, dst_batch, edge_batch, timestamp_batch, args.num_neighbors, is_old_data=True, dataset_idx=task)
 
-                    loss_dict['loss'] += data_dict['loss']
-                    loss_dict['l2_reg'] += data_dict['l2_reg']
+                    for key in loss_dict.keys():
+                        if key in data_dict:
+                            loss_dict[key] += data_dict[key]
+
+                    # loss_dict['loss'] += data_dict['loss']
+                    # loss_dict['l2_reg'] += data_dict['l2_reg']
 
             num_batch = math.ceil(len(cur_train_data.src) / args.batch_size)
             
@@ -447,11 +451,18 @@ for rp in range(rp_times):
 
                 data_dict = sgnn(src_batch, dst_batch, edge_batch, timestamp_batch, args.num_neighbors, dataset_idx=task, src_avail_mask=src_avail_mask, dst_avail_mask=dst_avail_mask)
 
-                loss_dict['loss'] += data_dict['loss']
-                loss_dict['l2_reg'] += data_dict['l2_reg']
+                for key in loss_dict.keys():
+                    if key in data_dict:
+                        loss_dict[key] += data_dict[key]
 
-            loss_dict['loss'] = loss_dict['loss'] / (num_batch + num_batch_old)
-            loss_dict['l2_reg'] = loss_dict['l2_reg'] / (num_batch + num_batch_old)
+                # loss_dict['loss'] += data_dict['loss']
+                # loss_dict['l2_reg'] += data_dict['l2_reg']
+                        
+            for key in loss_dict.keys():
+                loss_dict[key] /= (num_batch + num_batch_old)
+
+            # loss_dict['loss'] = loss_dict['loss'] / (num_batch + num_batch_old)
+            # loss_dict['l2_reg'] = loss_dict['l2_reg'] / (num_batch + num_batch_old)
             # Obj=Obj / (num_batch + num_batch_old)
             sgnn.end_epoch()
 
@@ -501,7 +512,11 @@ for rp in range(rp_times):
 
             epoch_bar.set_postfix({'loss': loss_dict['loss'], 'l2_reg': loss_dict['l2_reg'], f'train_{args.eval_metric}': train_result[args.eval_metric][-1], f'val_{args.eval_metric}': task_val_result[args.eval_metric][-1], f'test_{args.eval_metric}': test_result[args.eval_metric][-1]})
             if args.debug_mode == 0:
-                log_dict = {f'loss_period{task+1}': loss_dict['loss'], f'l2_reg_period{task+1}': loss_dict['l2_reg'], 'epoch': e, 'period': task+1}
+                log_dict = {}
+                for key in loss_dict.keys():
+                    log_dict[key+f'_period{task+1}'] = loss_dict[key]
+                log_dict.update({'epoch': e, 'period': task+1})
+                # log_dict = {f'loss_period{task+1}': loss_dict['loss'], f'l2_reg_period{task+1}': loss_dict['l2_reg'], 'epoch': e, 'period': task+1}
                 for metric in ['acc', 'ap', 'f1']:
                     for t in range(task+1):
                         log_dict[f'train_{metric}_task{t+1}_period{task+1}'] = train_result[metric][t]
@@ -540,7 +555,7 @@ for rp in range(rp_times):
                         sgnn.restore_memory(best_mem)
 
                     if args.model=='OTGNet':
-                        if not dis_IB:
+                        if not args.dis_IB:
                             best_IB = torch.load(best_IB_path)
                             if args.dataset != 'reddit' and args.dataset != 'yelp':
                                 sgnn.restore_IB(best_IB)

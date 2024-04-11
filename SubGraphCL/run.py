@@ -58,6 +58,7 @@ for dataset in ['reddit']:
     # error_min_distance_weight = 1.0
     error_min_loss_weight = 2.0
     # error_min_new_data_kept_ratio = 0.1
+    error_min_distill = 1
 
     partition = 'random'
 
@@ -66,7 +67,7 @@ for dataset in ['reddit']:
     emb_distribution_distill_weight = 1.0
     reg_gamma = 0.1
 
-    distill = 0
+    distill = 1
 
     weight_learning_method = 'pred_diff'
     weight_reg_method = 'acc'
@@ -192,6 +193,7 @@ for dataset in ['reddit']:
     cmd += " --reg_gamma {}".format(reg_gamma)
     cmd += " --multihead {}".format(multihead)
     cmd += " --partition {}".format(partition)
+    cmd += " --error_min_distill {}".format(error_min_distill)
     os.system(cmd)
 
 
