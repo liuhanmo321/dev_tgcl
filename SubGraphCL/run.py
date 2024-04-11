@@ -8,16 +8,16 @@ from pathlib import Path
 # dataset = 'yelp'
 # dataset = 'taobao'
 
-for dataset in ['reddit']:
+for dataset in ['amazon']:
 # for dataset in ['amazon', 'reddit']:
 # for dataset in ['amazon', 'yelp', 'reddit']:
     # model = 'DyGFormer' 
     model = 'TGAT'
     method = 'SubGraph'
 
-    device = 5
+    device = 7
     rp_times = 3
-    debug_mode = 1
+    debug_mode = 0
 
     select = 'none' 
     Path("./result/").mkdir(parents=True, exist_ok=True)
@@ -37,6 +37,7 @@ for dataset in ['reddit']:
         # n_epoch=1
         bs = 400
         memory_size = 1000
+        replay_size = 500
     elif dataset=='reddit':
         lr=1e-5
         num_datasets=3
@@ -44,6 +45,7 @@ for dataset in ['reddit']:
         n_epoch = 100
         bs = 600
         memory_size = 1000
+        replay_size = 500
     elif dataset=='amazon':
         lr=1e-5
         num_datasets=3
@@ -51,20 +53,24 @@ for dataset in ['reddit']:
         n_epoch = 100
         bs = 600
         memory_size = 1000
+        replay_size = 500
+
 
     select_mode = 'error_min'
     error_min_distribution = 1
     error_min_loss = 1
     # error_min_distance_weight = 1.0
-    error_min_loss_weight = 2.0
+    error_min_loss_weight = 2
     # error_min_new_data_kept_ratio = 0.1
     error_min_distill = 1
+    error_min_hash = 1
+    error_min_hash_threshold = 0.95
 
     partition = 'random'
 
     old_emb_distribution_distill = 0
     new_emb_distribution_distill = 1
-    emb_distribution_distill_weight = 1.0
+    emb_distribution_distill_weight = 2
     reg_gamma = 0.1
 
     distill = 1
@@ -194,6 +200,9 @@ for dataset in ['reddit']:
     cmd += " --multihead {}".format(multihead)
     cmd += " --partition {}".format(partition)
     cmd += " --error_min_distill {}".format(error_min_distill)
+    cmd += " --replay_size {}".format(replay_size)
+    cmd += " --error_min_hash {}".format(error_min_hash)
+    cmd += " --error_min_hash_threshold {}".format(error_min_hash_threshold)
     os.system(cmd)
 
 

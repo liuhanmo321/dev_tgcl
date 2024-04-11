@@ -130,68 +130,54 @@ class SubGraph(nn.Module):
                 loss = loss_src.mean() + loss_dst.mean()
                 
                 if self.args.distill:
-                    # with torch.no_grad():
-                    #     old_src_emb, old_dst_emb = self.old_model.get_embeddings(src_nodes, dst_nodes, edges, edge_times, n_neighbors)
-                    
-                    # new_src_emb, new_dst_emb = self.model.get_embeddings(src_nodes, dst_nodes, edges, edge_times, n_neighbors)
-
-                    # if self.args.old_emb_distribution_distill:
-                    #     # print("distill old")
-                    #     total_new_emb, total_old_emb = torch.cat([new_src_emb, new_dst_emb], dim=0), torch.cat([old_src_emb, old_dst_emb], dim=0)
-                    #     old_distribution_kernel = rbf_kernel(torch.cat([total_new_emb, total_old_emb], dim=0), gamma=self.args.reg_gamma)
-                    #     n, m = len(total_new_emb), len(total_old_emb)
-                    #     XX = old_distribution_kernel[:n, :n]
-                    #     YY = old_distribution_kernel[n:, n:]
-                    #     XY = old_distribution_kernel[:n, n:]
-                    #     YX = old_distribution_kernel[n:, :n]
-
-                    #     XX = torch.div(XX, n * n).sum(dim=1).view(1,-1)  # Source<->Source
-                    #     XY = torch.div(XY, -n * m).sum(dim=1).view(1,-1) # Source<->Target
-
-                    #     YX = torch.div(YX, -m * n).sum(dim=1).view(1,-1) #Target<->Source
-                    #     YY = torch.div(YY, m * m).sum(dim=1).view(1,-1)  # Target<->Target
-                            
-                    #     old_distribution_loss = (XX + XY).sum() + (YX + YY).sum()
-                    #     # old_distribution_loss = torch.mean(XX + YY - XY -YX)
-                    #     loss += old_distribution_loss * self.args.emb_distribution_distill_weight
-                    #     data_dict['old_distribution_loss'] = old_distribution_loss.item()
                     
                     if self.args.error_min_distill:
                         print("distribution regularization")
                         cur_labels = torch.cat([self.model.src_label[edges], self.model.dst_label[edges]], dim=0)
                         cur_emb = torch.cat([src_emb, dst_emb], dim=0)
 
+                        if self.args.error_min_hash:
+                            temp_src_nodes, temp_dst_nodes, temp_edges, temp_edge_times, temp_weight = self.new_memory.get_full_data()
+                            temp_weight = torch.tensor(temp_weight).to(self.args.device)
+                        else:
+                            temp_src_nodes, temp_dst_nodes, temp_edges, temp_edge_times = self.new_memory.get_full_data()
+                        temp_labels = torch.cat([self.model.src_label[temp_edges], self.model.dst_label[temp_edges]], dim=0)
+
+                        with torch.no_grad():
+                            temp_src_emb, temp_dst_emb = self.model.get_embeddings(temp_src_nodes, temp_dst_nodes, temp_edges, temp_edge_times, n_neighbors)
+                        temp_emb = torch.cat([temp_src_emb, temp_dst_emb], dim=0).detach()
+
+                        if self.args.error_min_hash:
+                            temp_emb = temp_emb * torch.cat([temp_weight, temp_weight], dim=0)
+
                         # unique_labels = np.unique(cur_labels)
                         unique_labels = torch.unique(cur_labels)
-
-                        temp_src_nodes, temp_dst_nodes, temp_edges, temp_edge_times = self.new_memory.get_full_data()
-                        temp_src_labels = self.model.src_label[temp_edges]
-                        temp_dst_labels = self.model.dst_label[temp_edges]
-                        # temp_labels = torch.cat([self.model.src_label[temp_edges], self.model.dst_label[temp_edges]], dim=0)
 
                         distribution_loss = 0
                         for label in unique_labels:
                             if label >= dataset_idx * self.args.num_class_per_dataset:
                                 continue
                             cur_mask = cur_labels == label
-                            temp_src_mask = temp_src_labels == label
-                            temp_dst_mask = temp_dst_labels == label
-                            temp_mask = (temp_src_mask | temp_dst_mask).cpu()
+                            # temp_src_mask = temp_src_labels == label
+                            # temp_dst_mask = temp_dst_labels == label
+                            temp_mask = temp_labels == label
 
-                            # print(label)
-                            # print(torch.unique(temp_src_labels[temp_src_mask[temp_mask]]))
+                            if len(cur_emb[cur_mask]) < int(self.args.batch_size / 2):
+                                continue
 
-                            with torch.no_grad():
-                                temp_src_emb, temp_dst_emb = self.model.get_embeddings(temp_src_nodes[temp_mask], temp_dst_nodes[temp_mask], temp_edges[temp_mask], temp_edge_times[temp_mask], n_neighbors)
-                            temp_emb = torch.cat([temp_src_emb, temp_dst_emb], dim=0)
+                            # print('GPU Memory Usage Before Calculating Kernel:')
+                            # print('Allocated:', round(torch.cuda.memory_allocated(0)/1024**3,4), 'GB')
+                            # print('Reserved: ', round(torch.cuda.memory_reserved(0)/1024**3,4), 'GB')
 
-                            temp_mask = torch.cat([self.model.src_label[temp_edges[temp_mask]], self.model.dst_label[temp_edges[temp_mask]]], dim=0) == label
-                            temp_emb = temp_emb[temp_mask]
+                            new_distribution_kernel = rbf_kernel(torch.cat([cur_emb[cur_mask], temp_emb[temp_mask]], dim=0), gamma=self.args.reg_gamma)
+                            n, m = len(cur_emb[cur_mask]), len(temp_emb[temp_mask])
 
-                            print(label, len(temp_emb))
+                            # print('GPU Memory Usage After Calculating Kernel:')
+                            # print('Allocated:', round(torch.cuda.memory_allocated(0)/1024**3,4), 'GB')
+                            # print('Reserved: ', round(torch.cuda.memory_reserved(0)/1024**3,4), 'GB')
+                            
+                            print(label, n, m)
 
-                            new_distribution_kernel = rbf_kernel(torch.cat([cur_emb[cur_mask], temp_emb], dim=0), gamma=self.args.reg_gamma)
-                            n, m = len(cur_emb[cur_mask]), len(temp_emb)
                             XX = new_distribution_kernel[:n, :n]
                             YY = new_distribution_kernel[n:, n:]
                             XY = new_distribution_kernel[:n, n:]
@@ -206,7 +192,7 @@ class SubGraph(nn.Module):
                             distribution_loss += (XX + XY).sum() + (YX + YY).sum()
                         
                         loss += distribution_loss * self.args.emb_distribution_distill_weight
-                        data_dict['dist_reg'] = distribution_loss.item() * self.args.emb_distribution_distill_weight
+                        data_dict['dist_reg'] = float(distribution_loss) * self.args.emb_distribution_distill_weight
 
                 loss = loss * self.args.old_data_weight
                 data_dict['loss'] = loss.item()
@@ -236,7 +222,19 @@ class SubGraph(nn.Module):
                 self.emb_projector_optimizer.step()
             if self.args.distill and self.args.residual_distill:
                 self.residual_projector_optimizer.step()
+
+                            
+            # if self.args.distill and self.args.error_min_distill and is_old_data:
+            #     print('GPU Memory Usage After Loss Backward:')
+            #     print('Allocated:', round(torch.cuda.memory_allocated(5)/1024**3,4), 'GB')
+            #     print('Reserved: ', round(torch.cuda.memory_reserved(5)/1024**3,4), 'GB')
             
+            #     del new_distribution_kernel
+                
+            #     print('GPU Memory Usage After Matrix Deletion:')
+            #     print('Allocated:', round(torch.cuda.memory_allocated(5)/1024**3,4), 'GB')
+            #     print('Reserved: ', round(torch.cuda.memory_reserved(5)/1024**3,4), 'GB')
+                            
         elif self.args.supervision == 'semi-supervised':
             return NotImplementedError
         
@@ -495,6 +493,7 @@ class SubGraph(nn.Module):
         if self.args.select_mode == 'error_min':
             # Compoute the loss for each node of each event, and store the loss values
             self.memory = Memory()
+            self.new_memory = Memory()
                 
             old_src_loss_bank = []
             old_dst_loss_bank = []
@@ -542,6 +541,7 @@ class SubGraph(nn.Module):
 
                 selected_index = []
                 distribution_only_selected_index = []
+                num_similar_embeddings_list = []
 
                 if self.args.partition == 'kmeans':
 
@@ -594,13 +594,39 @@ class SubGraph(nn.Module):
                         elif args.error_min_loss:
                             selected_mask = torch.topk(temp_cluster_loss, int(args.memory_size / num_parts), largest=False)[1].cpu()
                         
+                        selected_index.append(cluster_idx[selected_mask].unique())
+                        
                         if args.error_min_distill:
                             # print("data selected for distillation")
-                            distribution_only_selected_mask = select_prototypes(cluster_K, None, num_prototypes=int(args.memory_size / num_parts))
+                            distribution_only_selected_mask = select_prototypes(cluster_K, None, num_prototypes=int(args.replay_size / num_parts))
                             distribution_only_selected_index.append(cluster_idx[distribution_only_selected_mask].unique())
+
+                            if args.error_min_hash:
+                                num_similar_embeddings = []
+                                observed_idx = []
+                                for n, selected in enumerate(distribution_only_selected_mask):
+                                    if selected:
+                                        if cluster_idx[n] in observed_idx:
+                                            continue
+                                        else:
+                                            observed_idx.append(cluster_idx[n])
+
+                                        similarity_values = cluster_K[n]
+
+                                        # Define a similarity threshold
+                                        similarity_threshold = args.error_min_hash_threshold
+
+                                        # Find the indices where the similarity is above the threshold
+                                        similar_indices = torch.where(similarity_values > similarity_threshold)
+
+                                        # Count the number of similar embeddings
+                                        num_similar_embeddings.append(len(similar_indices[0]))
+                                
+                                num_similar_embeddings_list.extend(num_similar_embeddings)
+
+                                # potential risk! the same index can have different similar embeddings
                         
-                        selected_index.append(cluster_idx[selected_mask].unique())
-                    
+
                 selected_index = torch.cat(selected_index)
                 selected_index_mask = torch.tensor([True if (idx in selected_index) else False for idx in past_train_data.edge_idxs])
             
@@ -612,8 +638,16 @@ class SubGraph(nn.Module):
                     distribution_only_selected_index = torch.cat(distribution_only_selected_index)
                     distribution_only_selected_index_mask = torch.tensor([True if (idx in distribution_only_selected_index) else False for idx in past_train_data.edge_idxs])
                     
-                    cur_memory = Data(past_train_data.src[distribution_only_selected_index_mask], past_train_data.dst[distribution_only_selected_index_mask], past_train_data.timestamps[distribution_only_selected_index_mask], \
+                    if args.error_min_has:
+                        num_similar_embeddings_list = np.array(num_similar_embeddings_list)
+                        # Can use multiple different weighting methods.
+                        cur_memory = Data(past_train_data.src[distribution_only_selected_index_mask], past_train_data.dst[distribution_only_selected_index_mask], past_train_data.timestamps[distribution_only_selected_index_mask], \
+                                    past_train_data.edge_idxs[distribution_only_selected_index_mask], past_train_data.labels_src[distribution_only_selected_index_mask], past_train_data.labels_dst[distribution_only_selected_index_mask], \
+                                        weight=num_similar_embeddings_list)
+                    else:
+                        cur_memory = Data(past_train_data.src[distribution_only_selected_index_mask], past_train_data.dst[distribution_only_selected_index_mask], past_train_data.timestamps[distribution_only_selected_index_mask], \
                                 past_train_data.edge_idxs[distribution_only_selected_index_mask], past_train_data.labels_src[distribution_only_selected_index_mask], past_train_data.labels_dst[distribution_only_selected_index_mask])
+                    
                     self.new_memory.update_memory(cur_memory)
                 
                 # del y_K, y_emb_bank, y_idx_bank, y_loss_bank, selected_mask, selected_index_mask, selected_index
@@ -743,7 +777,10 @@ class Memory(nn.Module):
             return self.total_memory.src[idx], self.total_memory.dst[idx], self.total_memory.edge_idxs[idx], self.total_memory.timestamps[idx]
         
     def get_full_data(self):
-        return self.total_memory.src, self.total_memory.dst, self.total_memory.edge_idxs, self.total_memory.timestamps
+        if self.total_memory.weight is not None:
+            return self.total_memory.src, self.total_memory.dst, self.total_memory.edge_idxs, self.total_memory.timestamps, self.total_memory.weight
+        else:    
+            return self.total_memory.src, self.total_memory.dst, self.total_memory.edge_idxs, self.total_memory.timestamps
         # return self.total_memory
 
     def get_memory(self):
@@ -755,7 +792,7 @@ class Memory(nn.Module):
 
 class Data:
     def __init__(
-        self, src, dst, timestamps, edge_idxs, labels_src, labels_dst, induct_nodes=None
+        self, src, dst, timestamps, edge_idxs, labels_src, labels_dst, induct_nodes=None, weight=None
     ):
         self.src = src
         self.dst = dst
@@ -770,6 +807,9 @@ class Data:
         self.n_unique_nodes = len(self.unique_nodes)
         self.induct_nodes = induct_nodes
 
+        self.weight = weight
+        # self.dst_weight = dst_weight
+
     def add_data(self, x):
         self.src = np.concatenate((self.src, x.src))
         self.dst = np.concatenate((self.dst, x.dst))
@@ -782,6 +822,9 @@ class Data:
         self.n_interactions = len(self.src)
         self.unique_nodes = set(self.src) | set(self.dst)
         self.n_unique_nodes = len(self.unique_nodes)
+
+        if x.weight is not None:
+            self.weight = x.weight
 
 
 def distillation_loss(old_logits, new_logits, T=2):

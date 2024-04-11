@@ -65,7 +65,10 @@ parser.add_argument('--memory_size', type=int, default=100, help='Size of memory
 parser.add_argument('--memory_frac', type=float, default=-1, help='Size of memory buffer')
 parser.add_argument('--memory_replay_weight', type=int, default=1, help='Weight for replaying memory')
 parser.add_argument('--replay_select_mode', type=str, default='random', help='How to select the data from the memory')
-parser.add_argument('--replay_size', type=int, default=100, help='The number of data to replay')
+parser.add_argument('--replay_size', type=int, default=500, help='Size of memory buffer for distribution regularization')
+parser.add_argument('--error_min_hash', type=str2bool, default=0, help='Whether hash more data into the selected ones')
+parser.add_argument('--error_min_hash_threshold', type=float, default=0.05, help='The similarity threshold for data selection')
+
 
 parser.add_argument('--old_data_weight', type=float, default=1.0, help='The weight for the total old data loss')
 parser.add_argument('--partition', type=str, default='random', help='How to separate the data')
@@ -421,6 +424,7 @@ for rp in range(rp_times):
                     edge_batch = memory_data.edge_idxs[st_idx:ed_idx]
                     timestamp_batch = memory_data.timestamps[st_idx:ed_idx]
 
+                    print("batch number:",i)
                     data_dict = sgnn(src_batch, dst_batch, edge_batch, timestamp_batch, args.num_neighbors, is_old_data=True, dataset_idx=task)
 
                     for key in loss_dict.keys():
