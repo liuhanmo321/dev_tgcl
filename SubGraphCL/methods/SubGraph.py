@@ -164,41 +164,42 @@ class SubGraph(nn.Module):
                             start_time = time.time()
                             # new_distribution_kernel = rbf_kernel(torch.cat([cur_emb[cur_mask], temp_emb[temp_mask]], dim=0), gamma=self.args.reg_gamma)
                             new_distribution_kernel = partial_rbf_kernel(cur_emb[cur_mask], temp_emb[temp_mask], gamma=self.args.reg_gamma)
-                            # print("Kernel Time: ", time.time() - start_time)
+                            # print("Kernel shape", new_distribution_kernel.shape)
+                            print("Kernel Time: ", time.time() - start_time)
 
                             n, m = len(cur_emb[cur_mask]), len(temp_emb[temp_mask])
                             
-                            XX = new_distribution_kernel[:n, :n]
-                            YY = new_distribution_kernel[n:, n:]
-                            XY = new_distribution_kernel[:n, n:]
-                            YX = new_distribution_kernel[n:, :n]
+                            # XX = new_distribution_kernel[:n, :n]
+                            # YY = new_distribution_kernel[n:, n:]
+                            # XY = new_distribution_kernel[:n, n:]
+                            # YX = new_distribution_kernel[n:, :n]
                             
                             start_time = time.time()
-                            if self.args.error_min_hash:
-                                # print("hashing the number of similar data as weights")
-                                # print(len(temp_weight), len(temp_mask))
-                                weight = temp_weight[temp_mask]
-                                weight_matrix = torch.diag(weight)
-                                m = weight.sum()
+                            # if self.args.error_min_hash:
+                            #     # print("hashing the number of similar data as weights")
+                            #     # print(len(temp_weight), len(temp_mask))
+                            #     weight = temp_weight[temp_mask]
+                            #     weight_matrix = torch.diag(weight)
+                            #     m = weight.sum()
                                 
-                                XX = torch.div(XX, n * n).sum(dim=1).view(1,-1)  # Source<->Source
-                                XY = torch.mm(XY, weight_matrix)
-                                XY = torch.div(XY, -n * m).sum(dim=1).view(1,-1) # Source<->Target
+                            #     XX = torch.div(XX, n * n).sum(dim=1).view(1,-1)  # Source<->Source
+                            #     XY = torch.mm(XY, weight_matrix)
+                            #     XY = torch.div(XY, -n * m).sum(dim=1).view(1,-1) # Source<->Target
                                 
-                                YX = torch.mm(weight_matrix, YX)
-                                YX = torch.div(YX, -m * n).sum(dim=1).view(1,-1) #Target<->Source
-                                YY = torch.div(YY, m * m).sum(dim=1).view(1,-1)  # Target<->Target
-                            else:
+                            #     YX = torch.mm(weight_matrix, YX)
+                            #     YX = torch.div(YX, -m * n).sum(dim=1).view(1,-1) #Target<->Source
+                            #     YY = torch.div(YY, m * m).sum(dim=1).view(1,-1)  # Target<->Target
+                            # else:
                                 # XX = torch.div(XX, n * n).sum(dim=1).view(1,-1)  # Source<->Source
-                                XY = torch.div(XY, -n * m).sum(dim=1).view(1,-1) # Source<->Target
+                                # XY = torch.div(XY, -n * m).sum(dim=1).view(1,-1) # Source<->Target
 
-                                YX = torch.div(YX, -m * n).sum(dim=1).view(1,-1) #Target<->Source
+                                # YX = torch.div(YX, -m * n).sum(dim=1).view(1,-1) #Target<->Source
                                 # YY = torch.div(YY, m * m).sum(dim=1).view(1,-1)  # Target<->Target
                                 
-                            # distribution_loss += (XX + XY).sum() + (YX + YY).sum()
-                            distribution_loss += (XY).sum() + (YX).sum()
+                            # distribution_loss += (XY).sum() + (YX).sum()
+                            distribution_loss += 2 * torch.div(new_distribution_kernel, -n * m).sum(dim=1).view(1,-1).sum()
 
-                            # print("Distribution Time: ", time.time() - start_time)
+                            print("Distribution Time: ", time.time() - start_time)
                         
                         loss += distribution_loss * self.args.emb_distribution_distill_weight
                         data_dict['dist_reg'] = float(distribution_loss)
@@ -226,7 +227,7 @@ class SubGraph(nn.Module):
             
             start_time = time.time()
             loss.backward()
-            # print("Backward Time: ", time.time() - start_time)
+            print("Backward Time: ", time.time() - start_time)
             
             self.optimizer.step()
             if self.args.distill and self.args.emb_proj:
