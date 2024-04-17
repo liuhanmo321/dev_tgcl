@@ -8,14 +8,14 @@ from pathlib import Path
 # dataset = 'yelp'
 # dataset = 'taobao'
 
-for dataset in ['amazon']:
+for dataset in ['yelp']:
 # for dataset in ['amazon', 'reddit']:
 # for dataset in ['amazon', 'yelp', 'reddit']:
     # model = 'DyGFormer' 
     model = 'TGAT'
-    method = 'SubGraph'
+    method = 'Finetune'
 
-    device = 7
+    device = 3
     rp_times = 3
     debug_mode = 0
 
@@ -30,12 +30,12 @@ for dataset in ['amazon']:
         bs = 600
         memory_size = 2000
     elif dataset=='yelp':
-        lr=1e-4
+        lr=1e-5
         num_datasets=5        
         num_class_per_dataset=3
         n_epoch=100
         # n_epoch=1
-        bs = 400
+        bs = 600
         memory_size = 1000
         replay_size = 500
     elif dataset=='reddit':
@@ -60,20 +60,21 @@ for dataset in ['amazon']:
     error_min_distribution = 1
     error_min_loss = 1
     # error_min_distance_weight = 1.0
-    error_min_loss_weight = 2
+    error_min_loss_weight = 0.25
     # error_min_new_data_kept_ratio = 0.1
-    error_min_distill = 1
-    error_min_hash = 1
+    error_min_distill = 0
+    emb_distribution_distill_weight = 1
+    error_min_hash = 0
     error_min_hash_threshold = 0.95
 
     partition = 'random'
 
     old_emb_distribution_distill = 0
     new_emb_distribution_distill = 1
-    emb_distribution_distill_weight = 2
+    
     reg_gamma = 0.1
 
-    distill = 1
+    distill = 0
 
     weight_learning_method = 'pred_diff'
     weight_reg_method = 'acc'

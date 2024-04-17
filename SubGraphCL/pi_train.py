@@ -399,7 +399,7 @@ for rp in range(rp_times):
 
             epoch_start_time = time.time()
 
-            print("task:",task,"epoch:",e)
+            # print("task:",task,"epoch:",e)
             logger.debug('task {} , start {} epoch'.format(task,e))
 
             # loss_value = 0
@@ -424,7 +424,6 @@ for rp in range(rp_times):
                     edge_batch = memory_data.edge_idxs[st_idx:ed_idx]
                     timestamp_batch = memory_data.timestamps[st_idx:ed_idx]
 
-                    print("batch number:",i)
                     data_dict = sgnn(src_batch, dst_batch, edge_batch, timestamp_batch, args.num_neighbors, is_old_data=True, dataset_idx=task)
 
                     for key in loss_dict.keys():
