@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from typing import List
 
-from . import Finetune, SubGraph, Joint, LwF, EWC
+from . import Finetune, SubGraph, Joint, LwF, EWC, ER, SSM, iCaRL
 
 import importlib
 
@@ -11,7 +11,10 @@ module_list = {
     'LwF': LwF,
     'SubGraph': SubGraph,
     'Joint': Joint,
-    'EWC': EWC
+    'EWC': EWC,
+    'ER': ER,
+    'SSM': SSM,
+    'iCaRL': iCaRL
 }
 
 def get_model(args, neighbor_finder, node_features, edge_features, src_label, dst_label):

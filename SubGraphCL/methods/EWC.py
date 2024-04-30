@@ -3,6 +3,7 @@ from torch import nn
 from torch.autograd import Variable
 import torch.nn.functional as F
 
+import numpy as np
 from models.Backbone import TemporalGNNClassifier
 
 from copy import deepcopy
@@ -85,7 +86,7 @@ class EWC(nn.Module):
 
         self.dataset_idx = None
 
-    def forward(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None):
+    def forward(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None, src_avail_mask=None, dst_avail_mask=None):
         self.model.detach_memory()
         if self.args.task == 'nodecls':
             return self.forward_nodecls(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx)
@@ -95,7 +96,7 @@ class EWC(nn.Module):
     def forward_linkpred(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx):
         return
     
-    def forward_nodecls(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None):
+    def forward_nodecls(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None, src_avail_mask=None, dst_avail_mask=None):
         
         self.dataset_idx = dataset_idx
 
@@ -142,6 +143,27 @@ class EWC(nn.Module):
     def end_dataset(self, train_data, args):
         self.ewc_loss = EWC_loss(self.model, train_data, args, self.dataset_idx)
         return
+    
+    def begin_task(self, args, data, task):
+        visible_class = [task * args.num_class_per_dataset + i for i in range(args.num_class_per_dataset)]
+        src_mask = np.isin(data.labels_src, visible_class)
+        dst_mask = np.isin(data.labels_dst, visible_class)
+        mask = src_mask | dst_mask
+        return mask, src_mask, dst_mask
+
+    def set_features(self, node_features, edge_features):
+        if node_features is not None:
+            self.model.base_model.node_raw_features = torch.from_numpy(node_features.astype(np.float32)).to(self.args.device)
+        else:
+            self.model.base_model.node_raw_features = None
+        
+        if edge_features is not None:
+            self.model.base_model.edge_raw_features = torch.from_numpy(edge_features.astype(np.float32)).to(self.args.device)
+        else:
+            self.model.base_model.edge_raw_features = None
+
+    def set_class_weight(self, class_weight):
+        self.model.criterion = nn.CrossEntropyLoss(weight=torch.tensor(class_weight).float().to(self.args.device), reduction='none')
 
     def reset_graph(self):
         return

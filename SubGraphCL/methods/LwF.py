@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 
+import numpy as np
 from models.Backbone import TemporalGNNClassifier
 
 # The following code is to initialize the class for finetune, which is a vanilla baseline in continual learning.
@@ -31,7 +32,7 @@ class LwF(nn.Module):
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=args.lr)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=100, gamma=0.5)
 
-    def forward(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None):
+    def forward(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None, src_avail_mask=None, dst_avail_mask=None):
         self.model.detach_memory()
         if self.args.task == 'nodecls':
             return self.forward_nodecls(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx)
@@ -41,19 +42,23 @@ class LwF(nn.Module):
     def forward_linkpred(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx):
         return
     
-    def forward_nodecls(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None):
+    def forward_nodecls(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None, src_avail_mask=None, dst_avail_mask=None):
 
         data_dict = {}
 
         if self.args.supervision == 'supervised':
-            loss = self.model(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx)
+            # loss = self.model(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx)
+
+            loss_src, loss_dst, new_src_logits, new_dst_logits = self.model(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx, return_logits_loss=True)
+
+            loss = loss_src.mean() + loss_dst.mean()
 
             if dataset_idx > 0:
                 self.old_model.eval()
                 with torch.no_grad():
                     old_src_logits, old_dst_logits = self.old_model(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx, return_logits=True)
                 
-                new_src_logits, new_dst_logits = self.model(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx, return_logits=True)
+                # new_src_logits, new_dst_logits = self.model(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx, return_logits=True)
 
                 loss += distillation_loss(old_src_logits, new_src_logits, T=self.args.temperature) + distillation_loss(old_dst_logits, new_dst_logits, T=self.args.temperature)
 
@@ -70,6 +75,8 @@ class LwF(nn.Module):
 
     def set_neighbor_finder(self, neighbor_finder):
         self.model.set_neighbor_finder(neighbor_finder)
+        if self.old_model is not None:
+            self.old_model.set_neighbor_finder(neighbor_finder)
 
     def detach_memory(self):
         self.model.detach_memory()
@@ -89,6 +96,27 @@ class LwF(nn.Module):
     
     def end_dataset(self, train_data, args):
         return
+
+    def begin_task(self, args, data, task):
+        visible_class = [task * args.num_class_per_dataset + i for i in range(args.num_class_per_dataset)]
+        src_mask = np.isin(data.labels_src, visible_class)
+        dst_mask = np.isin(data.labels_dst, visible_class)
+        mask = src_mask | dst_mask
+        return mask, src_mask, dst_mask
+
+    def set_features(self, node_features, edge_features):
+        if node_features is not None:
+            self.model.base_model.node_raw_features = torch.from_numpy(node_features.astype(np.float32)).to(self.args.device)
+        else:
+            self.model.base_model.node_raw_features = None
+        
+        if edge_features is not None:
+            self.model.base_model.edge_raw_features = torch.from_numpy(edge_features.astype(np.float32)).to(self.args.device)
+        else:
+            self.model.base_model.edge_raw_features = None
+
+    def set_class_weight(self, class_weight):
+        self.model.criterion = nn.CrossEntropyLoss(weight=torch.tensor(class_weight).float().to(self.args.device), reduction='none')
 
     def reset_graph(self):
         return

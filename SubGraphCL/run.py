@@ -8,16 +8,16 @@ from pathlib import Path
 # dataset = 'yelp'
 # dataset = 'taobao'
 
-for dataset in ['amazon']:
+for dataset in ['reddit']:
 # for dataset in ['amazon', 'reddit']:
 # for dataset in ['amazon', 'yelp', 'reddit']:
-    # model = 'DyGFormer' 
+    # model = 'TGAT'
     model = 'TGAT'
-    method = 'SubGraph'
+    method = 'LwF'
 
-    device = 0
+    device = 5
     rp_times = 3
-    debug_mode = 1
+    debug_mode = 0
 
     select = 'none' 
     Path("./result/").mkdir(parents=True, exist_ok=True)
@@ -36,7 +36,7 @@ for dataset in ['amazon']:
         n_epoch=100
         # n_epoch=1
         bs = 600
-        memory_size = 1000
+        memory_size = 500
         replay_size = 500
     elif dataset=='reddit':
         lr=1e-5
@@ -60,10 +60,10 @@ for dataset in ['amazon']:
     error_min_distribution = 1
     error_min_loss = 1
     # error_min_distance_weight = 1.0
-    error_min_loss_weight = 0.25
+    error_min_loss_weight = 1
     # error_min_new_data_kept_ratio = 0.1
     error_min_distill = 1
-    emb_distribution_distill_weight = 1
+    emb_distribution_distill_weight = 0.01
     error_min_hash = 0
     error_min_hash_threshold = 0.95
 

@@ -111,7 +111,7 @@ parser.add_argument('--emb_residual', type=str2bool, default=0, help='Whether to
 parser.add_argument('--rand_neighbor', type=str2bool, default=0, help='Whether to sample random neighbors instead of using past neighbors')
 
 parser.add_argument('--temperature', type=float, default=2.0, help='Temperature for distillation')
-parser.add_argument('--ewc_weight', type=float, default=1.0, help='The weight for EWC loss')
+parser.add_argument('--ewc_weight', type=float, default=1e-4, help='The weight for EWC loss')
 
 # parser.add_argument('--explainer', type=str, default='PGExplainer', help='Explainer')
 # parser.add_argument('--explainer_train_epoch', type=int, default=100, help='Number of epochs to train the explainer')
@@ -348,9 +348,14 @@ for rp in range(rp_times):
         cum_test_data = deepcopy(cum_val_data)
         cum_test_data.add_data(test_data[task])
 
-        train_neighbor_finder = get_neighbor_sampler(cum_train_data, 'recent')
-        val_neighbor_finder = get_neighbor_sampler(cum_val_data, 'recent')
-        test_neighbor_finder = get_neighbor_sampler(cum_test_data, 'recent')
+        if args.method == 'SSM':
+            train_neighbor_finder = get_neighbor_sampler(cum_train_data, 'time_interval_aware', seed=seed)
+            val_neighbor_finder = get_neighbor_sampler(cum_val_data, 'time_interval_aware', seed=seed)
+            test_neighbor_finder = get_neighbor_sampler(cum_test_data, 'time_interval_aware', seed=seed)
+        else:
+            train_neighbor_finder = get_neighbor_sampler(cum_train_data, 'recent')
+            val_neighbor_finder = get_neighbor_sampler(cum_val_data, 'recent')
+            test_neighbor_finder = get_neighbor_sampler(cum_test_data, 'recent')
 
         if args.rand_neighbor and args.method == 'SubGraph':
             rand_sampler = RandEdgeSampler(cum_train_data.src, cum_train_data.dst)
@@ -580,6 +585,8 @@ for rp in range(rp_times):
             
         if hasattr(sgnn, "old_model"):
             sgnn.old_model = deepcopy(sgnn.model)
+        if hasattr(sgnn, "end_dataset") and args.method != 'SubGraph':
+            sgnn.end_dataset(cur_train_data, args)
 
         # if args.memory_replay:
         #     if args.select_mode == 'event_weight' and args.method == 'SubGraph':
@@ -590,19 +597,21 @@ for rp in range(rp_times):
         if args.debug_mode == 0:
             # wandb.log({'final_avg_performance': test_acc_record[-1], 'period': (task + 1)})
             wandb.log({'final_avg_performance': test_acc_record[-1], 'final_avg_f1': test_result['f1'], 'final_avg_ap': test_result['ap'], 'final_avg_acc': test_result['acc'], 'period': (task + 1), 'selection_time': selection_time})
+    
+    wandb.log('avg_performance', test_acc_record[-1])
 
     per_task_performance_matrix_str = np.array2string(per_task_performance_matrix, precision=2, separator='\t', suppress_small=True)
     per_task_performance_matrix_str = per_task_performance_matrix_str.replace('[', '').replace(']', '')
     print('Performance List: ', test_acc_record)
     # print("Average performance: %.2f"%(np.array(avg_performance).mean()))
-    print("Average performance: %.2f"%(test_acc_record[-1]))
+    print("Average performance: %.4f"%(test_acc_record[-1]))
     print(f"Per Task Performance: \n {per_task_performance_matrix_str}\n")
 
     avg_performance_all.append(test_acc_record[-1])
 
     f.write("Performance List: "+str(test_acc_record))
     f.write("\n")
-    f.write("Average performance: %.2f"%(test_acc_record[-1]))
+    f.write("Average performance: %.4f"%(test_acc_record[-1]))
     f.write("\n")
     f.write(f"Per Task Performance: \n {per_task_performance_matrix_str}\n")
     f.write("\n")
@@ -625,7 +634,7 @@ f.write(str(args))
 f.write("\n")
 f.write(time_now)
 f.write("\n")
-print("Overall AP: %.2f (%.2f)"%(np.array(avg_performance_all).mean(), np.array(avg_performance_all).std()))
+print("Overall AP: %.4f (%.4f)"%(np.array(avg_performance_all).mean(), np.array(avg_performance_all).std()))
 # print("Overall AF: %.2f (%.2f)"%(np.array(avg_forgetting_all).mean(), np.array(avg_performance_all).std()))
 
 f.write(f"Backbone:{args.model}, Method:{args.method}\n")
@@ -636,7 +645,7 @@ f.write(f"Error Min Loss:{args.error_min_loss}, Error Min Loss Weight:{args.erro
 f.write(f"Emb Distill:{args.emb_distill}, Struct Distill:{args.struct_distill}, Emb Proj:{args.emb_proj}, Residual Distill:{args.residual_distill}, Rand Neighbor:{args.rand_neighbor}\n")
 f.write(f"Emb Distill Weight:{args.emb_distill_weight}, Struct Distill Weight:{args.struct_distill_weight}, Similarity Function:{args.similarity_function}, Distribution Measure:{args.distribution_measure}\n")
 f.write(f"Weight Learning Method:{args.weight_learning_method}, Weight Reg Method:{args.weight_reg_method}, Weight Training Epoch:{args.event_weight_epochs}\n")
-f.write("Overall AP: %.2f (%.2f)"%(np.array(avg_performance_all).mean(), np.array(avg_performance_all).std()))
+f.write("Overall AP: %.4f (%.4f)"%(np.array(avg_performance_all).mean(), np.array(avg_performance_all).std()))
 f.write("\n")
 # f.write("Overall AF: %.2f (%.2f)"%(np.array(avg_forgetting_all).mean(), np.array(avg_forgetting_all).std()))
 # f.write("\n")

@@ -124,7 +124,7 @@ class TemporalGNNClassifier(nn.Module):
         
         return src_embeddings, dst_embeddings
 
-    def forward(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None, src_avail_mask=None, dst_avail_mask=None, return_logits=False, return_emb_loss=False):
+    def forward(self, src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx=None, src_avail_mask=None, dst_avail_mask=None, return_logits=False, return_emb_loss=False, return_logits_loss=False):
 
         # Get the embeddings
         if self.multihead:
@@ -255,6 +255,9 @@ class TemporalGNNClassifier(nn.Module):
 
             if return_emb_loss:
                 return loss_src, loss_dst, src_embeddings, dst_embeddings
+
+            if return_logits_loss:
+                return loss_src, loss_dst, src_preds, dst_preds
             
             if len(loss_src) == 0:
                 return torch.tensor(0.0).to(self.args.device)
