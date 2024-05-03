@@ -8,14 +8,14 @@ from pathlib import Path
 # dataset = 'yelp'
 # dataset = 'taobao'
 
-for dataset in ['reddit']:
+for dataset in ['amazon']:
 # for dataset in ['amazon', 'reddit']:
 # for dataset in ['amazon', 'yelp', 'reddit']:
-    # model = 'TGAT'
     model = 'TGAT'
-    method = 'LwF'
+    # model = 'DyGFormer'
+    method = 'SSM'
 
-    device = 5
+    device = 1
     rp_times = 3
     debug_mode = 0
 

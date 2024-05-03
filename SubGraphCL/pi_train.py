@@ -598,7 +598,7 @@ for rp in range(rp_times):
             # wandb.log({'final_avg_performance': test_acc_record[-1], 'period': (task + 1)})
             wandb.log({'final_avg_performance': test_acc_record[-1], 'final_avg_f1': test_result['f1'], 'final_avg_ap': test_result['ap'], 'final_avg_acc': test_result['acc'], 'period': (task + 1), 'selection_time': selection_time})
     
-    wandb.log('avg_performance', test_acc_record[-1])
+    # wandb.log({'avg_performance': test_acc_record[-1]})
 
     per_task_performance_matrix_str = np.array2string(per_task_performance_matrix, precision=2, separator='\t', suppress_small=True)
     per_task_performance_matrix_str = per_task_performance_matrix_str.replace('[', '').replace(']', '')
