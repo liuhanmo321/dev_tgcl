@@ -165,7 +165,7 @@ class SubGraph(nn.Module):
                             # new_distribution_kernel = rbf_kernel(torch.cat([cur_emb[cur_mask], temp_emb[temp_mask]], dim=0), gamma=self.args.reg_gamma)
                             new_distribution_kernel = partial_rbf_kernel(cur_emb[cur_mask], temp_emb[temp_mask], gamma=self.args.reg_gamma)
                             # print("Kernel shape", new_distribution_kernel.shape)
-                            print("Kernel Time: ", time.time() - start_time)
+                            # print("Kernel Time: ", time.time() - start_time)
 
                             n, m = len(cur_emb[cur_mask]), len(temp_emb[temp_mask])
                             
@@ -199,7 +199,7 @@ class SubGraph(nn.Module):
                             # distribution_loss += (XY).sum() + (YX).sum()
                             distribution_loss += 2 * torch.div(new_distribution_kernel, -n * m).sum(dim=1).view(1,-1).sum()
 
-                            print("Distribution Time: ", time.time() - start_time)
+                            # print("Distribution Time: ", time.time() - start_time)
                         
                         loss += distribution_loss * self.args.emb_distribution_distill_weight
                         data_dict['dist_reg'] = float(distribution_loss)
@@ -227,7 +227,7 @@ class SubGraph(nn.Module):
             
             start_time = time.time()
             loss.backward()
-            print("Backward Time: ", time.time() - start_time)
+            # print("Backward Time: ", time.time() - start_time)
             
             self.optimizer.step()
             if self.args.distill and self.args.emb_proj:
@@ -555,6 +555,20 @@ class SubGraph(nn.Module):
                 distribution_only_selected_index = []
                 num_similar_embeddings_list = []
 
+                if self.args.partition == 'none':
+                    K = rbf_kernel(y_emb_bank)
+                    if args.error_min_loss:
+                        temp_cluster_loss = args.error_min_loss_weight * (y_loss_bank - y_loss_bank.min()) / (y_loss_bank.max() - y_loss_bank.min())
+                    else:
+                        temp_cluster_loss = torch.zeros_like(y_loss_bank)
+                    
+                    if args.error_min_distribution:
+                        selected_mask = select_prototypes(K, temp_cluster_loss, num_prototypes=int(args.memory_size / num_parts))
+                    elif args.error_min_loss:
+                        selected_mask = torch.topk(temp_cluster_loss, int(args.memory_size / num_parts), largest=False)[1]
+                    
+                    selected_index.append(y_idx_bank[selected_mask].unique())
+
                 if self.args.partition == 'kmeans':
 
                     y_cluster_idx = KMeans(n_clusters=num_parts, random_state=0, n_init="auto").fit_predict(y_emb_bank.cpu().numpy())
@@ -579,6 +593,11 @@ class SubGraph(nn.Module):
                             selected_mask = torch.topk(temp_cluster_loss, int(args.memory_size / num_parts), largest=False)[1]
                         
                         selected_index.append(cluster_idx[selected_mask].unique())
+
+                        if args.error_min_distill:
+                            # print("data selected for distillation")
+                            distribution_only_selected_mask = select_prototypes(cluster_K, None, num_prototypes=int(args.replay_size / num_parts))
+                            distribution_only_selected_index.append(cluster_idx[distribution_only_selected_mask].unique())
                 
                 elif self.args.partition == 'random':
                     temp_idx = np.array(range(len(y_emb_bank)))

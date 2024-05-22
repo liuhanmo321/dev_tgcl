@@ -24,7 +24,9 @@ TGNNEXPLAINER-PUBLIC/
 
 TGCL/*
 
-SubGraphCL/data/*
+SubGraphCL/data/*.csv
+SubGraphCL/data/*.pkl
+SubGraphCL/data/*.npy
 
 wandb/
 
