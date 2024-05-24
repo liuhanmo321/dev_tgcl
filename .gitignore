@@ -6,7 +6,8 @@ glove/
 SubGraphCL/checkpoints
 SubGraphCL/raw_data
 SubGraphCL/log
-
+test.ipynb
+train.py
 SubGraphCL/data/taobao_node.npy
 SubGraphCL/data/taobao.csv
 SubGraphCL/data/reddit_node.npy
@@ -32,3 +33,9 @@ wandb/
 
 Modified_OTGNet
 OTGNet
+
+SubGraphCL/data/reddit.zip
+SubGraphCL/data/amazon.zip
+SubGraphCL/data/yelp.zip
+
+
