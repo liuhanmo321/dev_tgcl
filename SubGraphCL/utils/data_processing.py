@@ -57,7 +57,7 @@ class Data:
         self.dst_avail_mask = dst_mask[mask]
 
 
-def get_past_inductive_data(DatasetName, n_task, n_class, blurry):
+def get_past_inductive_data(DatasetName, n_task, n_class, blurry, train_frac = 0.8):
 
     random.seed(42)
 
@@ -76,6 +76,10 @@ def get_past_inductive_data(DatasetName, n_task, n_class, blurry):
         prefix = "./data/{}_24day_200d_past_inductive_".format(DatasetName)
     elif DatasetName == 'yelp':
         prefix = "./data/{}_200d_past_inductive_".format(DatasetName)
+    elif DatasetName == 'reddit_large':
+        prefix = "./data/reddit_32topics_200d_past_inductive_"
+    elif DatasetName == 'reddit_long':
+        prefix = "./data/reddit_long_period_200d_past_inductive_"
 
     for i in range(n_task):
         tmp_full_graph = pd.read_csv("{}{}.csv".format(prefix, i))
@@ -99,7 +103,7 @@ def get_past_inductive_data(DatasetName, n_task, n_class, blurry):
         class_unique_nodes = set(class_full_data_src.u.values) | set(class_full_data_dst.i.values)
 
         tmp_train_node_set = set(
-            random.sample(class_unique_nodes, int(0.8 * len(class_unique_nodes)))
+            random.sample(class_unique_nodes, int(train_frac * len(class_unique_nodes)))
         )
         tmp_no_train_node_set = class_unique_nodes - tmp_train_node_set
         tmp_val_node_set = set(
@@ -112,6 +116,7 @@ def get_past_inductive_data(DatasetName, n_task, n_class, blurry):
         class_test_node.append(tmp_test_node_set)
         class_no_train_node.append(tmp_no_train_node_set)
     
+    total_edges = 0
     for i in range(n_task):
         src = full_data[i].u.values
         dst = full_data[i].i.values
@@ -119,6 +124,8 @@ def get_past_inductive_data(DatasetName, n_task, n_class, blurry):
         labels_src = full_data[i].label_u.values
         labels_dst = full_data[i].label_i.values
         timestamps = full_data[i].ts.values
+
+        total_edges += len(src)
 
         task_train_node_set = set.union(*class_train_node[: (i + 1) * n_class])
         task_val_node_set = set.union(*class_val_node[: (i + 1) * n_class])
@@ -250,8 +257,18 @@ def get_past_inductive_data(DatasetName, n_task, n_class, blurry):
         tmp_all_data.label_i.values,
     )
 
-    node_features = np.load("./data/{}_past_inductive_node_feat.npy".format(DatasetName))
+    if DatasetName == 'reddit_large':
+        node_features = np.load("./data/reddit_32topics_200d_past_inductive_node_feat.npy")
+    elif DatasetName == 'reddit_long':
+        node_features = np.load("./data/reddit_long_period_200d_past_inductive_node_feat.npy")
+    else:
+        node_features = np.load("./data/{}_past_inductive_node_feat.npy".format(DatasetName))
     edge_features = np.zeros((len(all_data.src), node_features.shape[1]))
+
+    num_all_nodes = len(set(all_data.src) | set(all_data.dst))
+    num_all_edges = len(all_data.src)
+
+    print(num_all_nodes, total_edges)
 
     return (
         node_features,

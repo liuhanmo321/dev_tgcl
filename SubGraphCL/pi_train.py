@@ -1,4 +1,5 @@
 import os
+
 import shutil
 from random import sample
 import random
@@ -72,6 +73,7 @@ parser.add_argument('--error_min_hash_threshold', type=float, default=0.05, help
 
 parser.add_argument('--old_data_weight', type=float, default=1.0, help='The weight for the total old data loss')
 parser.add_argument('--partition', type=str, default='random', help='How to separate the data')
+parser.add_argument('--partition_size', type=int, default=10000, help='How many samples per partition')
 
 # Learning based subgraph selection
 parser.add_argument('--mid_model_path', type=str, default='', help='The storage path for mid model parameters')
@@ -88,6 +90,7 @@ parser.add_argument('--error_min_loss', type=str2bool, default=True, help='Wheth
 parser.add_argument('--error_min_loss_weight', type=float, default=1.0, help='The weight during selection when using the loss')
 # parser.add_argument('--error_min_new_data_kept_ratio', type=float, default=1.0, help='The ratio of new data kept during selection')
 parser.add_argument('--error_min_distill', type=str2bool, default=True, help='Whether to require the distribution to be similar')
+parser.add_argument('--distill_size_threshold', type=float, default=0.5, help='Distill when ratio is satisfied')
 
 parser.add_argument('--old_emb_distribution_distill', type=str2bool, default=0, help='Whether to distill the old emb distribution')
 # parser.add_argument('--old_emb_distribution_distill_weight', type=float, default=1.0, help='The weight for distilling the old emb distribution')
@@ -171,6 +174,7 @@ parser.add_argument('--recover', type=int, default=1, help='recover')
 
 parser.add_argument('--class_balance', type=int, default=1, help='class balance')
 parser.add_argument('--eval_avg', type=str, default='node', help='evaluation average')
+parser.add_argument('--train_frac', type=float, default=0.8, help='fraction of training data')
 
 parser.add_argument('--results_dir', type=str, default='.', help='results diretion')
 parser.add_argument('--explainer_ckpt_dir', type=str, default='.', help='check point direction for the explainer')
@@ -199,11 +203,7 @@ ch_IB = args.ch_IB
 pattern_rho = args.pattern_rho
 # class_balance = args.class_balance
 eval_avg = args.eval_avg
-# feature_iter=args.feature_iter==1
-# patience=args.patience
-# radius = args.radius
-# beta = args.beta
-# gamma = args.gamma
+
 uml = args.uml
 # pmethod = args.pmethod
 # sk = args.sk
@@ -269,7 +269,7 @@ for rp in range(rp_times):
 
     print(str(args))
     # data processing
-    node_features, edge_features, full_data, train_data, val_data, test_data, all_data, _, _ = get_past_inductive_data(args.dataset,args.num_datasets,args.num_class_per_dataset, args.blurry)
+    node_features, edge_features, full_data, train_data, val_data, test_data, all_data, _, _ = get_past_inductive_data(args.dataset,args.num_datasets,args.num_class_per_dataset, args.blurry, args.train_frac)
     
     args.node_init_dim = node_features.shape[1]
     args.node_embedding_dim = node_features.shape[1]
@@ -550,7 +550,7 @@ for rp in range(rp_times):
                     logger.info(f'Early stop at {early_stopper[task].max_round} epochs, loading the best model at epoch {early_stopper[task].best_epoch}')
                     # logger.info(f'Loading the best model at epoch {early_stopper[task].best_epoch}')
                     best_model_path, _, _, _ = get_checkpoint_path(args.model, time_now, task, uml)
-                    sgnn = torch.load(best_model_path)
+                    sgnn = torch.load(best_model_path, weights_only=False)
                     sgnn.set_features(node_features, edge_features)
                     # logger.info(f'Loaded the best model at epoch {early_stopper[task].best_epoch} for inference')
                     sgnn.eval()
@@ -559,16 +559,16 @@ for rp in range(rp_times):
 
                     best_model_path, best_mem_path, best_IB_path, best_PGen_path = get_checkpoint_path(args.model, time_now, task, uml)
                     if args.memory_replay:
-                        best_mem = torch.load(best_mem_path)
+                        best_mem = torch.load(best_mem_path, weights_only=False)
                         sgnn.restore_memory(best_mem)
 
                     if args.model=='OTGNet':
                         if not args.dis_IB:
-                            best_IB = torch.load(best_IB_path)
+                            best_IB = torch.load(best_IB_path, weights_only=False)
                             if args.dataset != 'reddit' and args.dataset != 'yelp':
                                 sgnn.restore_IB(best_IB)
                         if uml:
-                            best_PGen = torch.load(best_PGen_path)
+                            best_PGen = torch.load(best_PGen_path, weights_only=False)
                             sgnn.restore_PGen(best_PGen)
 
                     test_result, task_test_result = eval_prediction(sgnn, test_data[task], task, task, args.batch_size, 'test', uml, eval_avg, args.multihead, args.num_class_per_dataset, within_task=True)
@@ -596,11 +596,13 @@ for rp in range(rp_times):
 
         if args.debug_mode == 0:
             # wandb.log({'final_avg_performance': test_acc_record[-1], 'period': (task + 1)})
-            wandb.log({'final_avg_performance': test_acc_record[-1], 'final_avg_f1': test_result['f1'], 'final_avg_ap': test_result['ap'], 'final_avg_acc': test_result['acc'], 'period': (task + 1), 'selection_time': selection_time})
+            # wandb.log({'final_avg_performance': test_acc_record[-1], 'final_avg_f1': test_result['f1'], 'final_avg_ap': test_result['ap'], 'final_avg_acc': test_result['acc'], 'period': (task + 1), 'selection_time': selection_time})
+
+            wandb.log({'final_avg_performance': test_acc_record[-1], 'final_avg_f1': test_result['f1'], 'final_avg_ap': test_result['ap'], 'final_avg_acc': test_result['acc'], 'period': (task + 1), 'selection_time': selection_time, 'avg_training_time': np.array(per_epoch_training_time[-1]).mean()})
     
     # wandb.log({'avg_performance': test_acc_record[-1]})
 
-    per_task_performance_matrix_str = np.array2string(per_task_performance_matrix, precision=2, separator='\t', suppress_small=True)
+    per_task_performance_matrix_str = np.array2string(per_task_performance_matrix, precision=4, separator='\t', suppress_small=True)
     per_task_performance_matrix_str = per_task_performance_matrix_str.replace('[', '').replace(']', '')
     print('Performance List: ', test_acc_record)
     # print("Average performance: %.2f"%(np.array(avg_performance).mean()))
@@ -639,9 +641,9 @@ print("Overall AP: %.4f (%.4f)"%(np.array(avg_performance_all).mean(), np.array(
 
 f.write(f"Backbone:{args.model}, Method:{args.method}\n")
 f.write(f"Select Mode:{args.select_mode}, Memory Size:{args.memory_size}, Memory Weight:{args.old_data_weight}\n")
-f.write(f"Distill:{args.distill}, Old Dist Distill:{args.old_emb_distribution_distill}, New Dist Distill:{args.new_emb_distribution_distill}\n")
-f.write(f"Dist Distill Weight:{args.emb_distribution_distill_weight}, Reg Gamma:{args.reg_gamma}, \n")
-f.write(f"Error Min Loss:{args.error_min_loss}, Error Min Loss Weight:{args.error_min_loss_weight}, Error Min Distribution:{args.error_min_distribution}\n")
+f.write(f"Error Min Loss:{args.error_min_loss}, Error Min Distribution:{args.error_min_distribution}, Error Min Loss Weight:{args.error_min_loss_weight}\n")
+f.write(f"Distill:{args.distill}, Error Min Distill:{args.error_min_distill}, Dist Distill Weight:{args.emb_distribution_distill_weight}\n")
+f.write(f"Reg Gamma:{args.reg_gamma}, \n")
 f.write(f"Emb Distill:{args.emb_distill}, Struct Distill:{args.struct_distill}, Emb Proj:{args.emb_proj}, Residual Distill:{args.residual_distill}, Rand Neighbor:{args.rand_neighbor}\n")
 f.write(f"Emb Distill Weight:{args.emb_distill_weight}, Struct Distill Weight:{args.struct_distill_weight}, Similarity Function:{args.similarity_function}, Distribution Measure:{args.distribution_measure}\n")
 f.write(f"Weight Learning Method:{args.weight_learning_method}, Weight Reg Method:{args.weight_reg_method}, Weight Training Epoch:{args.event_weight_epochs}\n")

@@ -38,4 +38,5 @@ SubGraphCL/data/reddit.zip
 SubGraphCL/data/amazon.zip
 SubGraphCL/data/yelp.zip
 
-
+*test.py
+*result*

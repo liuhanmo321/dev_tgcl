@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import math
 from models.Backbone import TemporalGNNClassifier
 from copy import deepcopy
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, AgglomerativeClustering
 import time
 # from methods.SubGraph_utils import local_rbf_kernel, select_prototypes
 # The following code is to initialize the class for finetune, which is a vanilla baseline in continual learning.
@@ -158,7 +158,7 @@ class SubGraph(nn.Module):
                             cur_mask = cur_labels == label
                             temp_mask = temp_labels == label
 
-                            if len(cur_emb[cur_mask]) < int(self.args.batch_size / 2):
+                            if len(cur_emb[cur_mask]) < int(self.args.batch_size * self.args.distill_size_threshold):
                                 continue
                             
                             start_time = time.time()
@@ -549,7 +549,8 @@ class SubGraph(nn.Module):
                 y_loss_bank = total_loss_bank[y_mask]
                 y_idx_bank = total_idx_bank[y_mask]
 
-                num_parts = int(len(y_emb_bank) / 10000) + 1
+                # num_parts = int(len(y_emb_bank) / 10000) + 1
+                num_parts = int(len(y_emb_bank) / self.args.partition_size) + 1
 
                 selected_index = []
                 distribution_only_selected_index = []
@@ -569,15 +570,20 @@ class SubGraph(nn.Module):
                     
                     selected_index.append(y_idx_bank[selected_mask].unique())
 
-                if self.args.partition == 'kmeans':
-
-                    y_cluster_idx = KMeans(n_clusters=num_parts, random_state=0, n_init="auto").fit_predict(y_emb_bank.cpu().numpy())
+                if self.args.partition in ['kmeans', 'hierarchical']:
+                    
+                    if self.args.partition == 'kmeans':
+                        y_cluster_idx = KMeans(n_clusters=num_parts, random_state=0, n_init="auto").fit_predict(y_emb_bank.cpu().numpy())
+                    if self.args.partition == 'hierarchical':
+                        y_cluster_idx = AgglomerativeClustering(n_clusters=num_parts, random_state=0).fit_predict(y_emb_bank.cpu().numpy())
                     
                     for cluster in range(num_parts):
                         cluster_mask = y_cluster_idx == cluster
                         cluster_emb = y_emb_bank[cluster_mask]
                         cluster_loss = y_loss_bank[cluster_mask]
                         cluster_idx = y_idx_bank[cluster_mask]
+
+                        print("Cluster size: ", len(cluster_emb))
                         
                         cluster_K = rbf_kernel(cluster_emb)
 

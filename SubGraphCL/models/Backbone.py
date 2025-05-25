@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 from typing import List
 
+import numpy as np
+
 from copy import deepcopy
 
 from .TGAT import TGAN
@@ -47,6 +49,10 @@ def get_base_model(args, neighbor_finder, node_features, edge_features):
                                         time_feat_dim=args.time_feat_dim, channel_embedding_dim=args.channel_embedding_dim, patch_size=args.patch_size,
                                         num_layers=args.num_layers, num_heads=args.num_attn_heads, dropout=args.dropout,
                                         max_input_sequence_length=args.max_input_sequence_length, device=args.device)
+    
+    elif args.model == 'WordEmb':
+        return WordEmb(node_raw_features=node_features, edge_raw_features=edge_features, neighbor_sampler=neighbor_finder,
+                        time_feat_dim=args.time_feat_dim, num_layers=args.num_layers, num_heads=args.num_attn_heads, dropout=args.dropout, device=args.device)
 
     
 
@@ -63,6 +69,80 @@ class Predictor(nn.Module):
         x = self.layer2(x)
         return x
 
+
+class TimeEncoder(nn.Module):
+
+    def __init__(self, time_dim: int, parameter_requires_grad: bool = True):
+        """
+        Time encoder.
+        :param time_dim: int, dimension of time encodings
+        :param parameter_requires_grad: boolean, whether the parameter in TimeEncoder needs gradient
+        """
+        super(TimeEncoder, self).__init__()
+
+        self.time_dim = time_dim
+        # trainable parameters for time encoding
+        self.w = nn.Linear(1, time_dim)
+        self.w.weight = nn.Parameter((torch.from_numpy(1 / 10 ** np.linspace(0, 9, time_dim, dtype=np.float32))).reshape(time_dim, -1))
+        self.w.bias = nn.Parameter(torch.zeros(time_dim))
+
+        if not parameter_requires_grad:
+            self.w.weight.requires_grad = False
+            self.w.bias.requires_grad = False
+
+    def forward(self, timestamps: torch.Tensor):
+        """
+        compute time encodings of time in timestamps
+        :param timestamps: Tensor, shape (batch_size, seq_len)
+        :return:
+        """
+        # Tensor, shape (batch_size, seq_len, 1)
+        timestamps = timestamps.unsqueeze(dim=2)
+
+        # Tensor, shape (batch_size, seq_len, time_dim)
+        output = torch.cos(self.w(timestamps))
+
+        return output
+
+
+class WordEmb(nn.Module):
+    def __init__(self, node_raw_features: np.ndarray, edge_raw_features: np.ndarray, neighbor_sampler,
+                 time_feat_dim: int, num_layers: int = 2, num_heads: int = 2, dropout: float = 0.1, device: str = 'cpu'):
+        super(WordEmb, self).__init__()
+        self.node_raw_features = torch.from_numpy(node_raw_features.astype(np.float32)).to(device)
+        self.edge_raw_features = torch.from_numpy(edge_raw_features.astype(np.float32)).to(device)
+
+        self.device = device
+        self.node_feat_dim = self.node_raw_features.shape[1]
+        self.edge_feat_dim = self.edge_raw_features.shape[1]
+        self.time_feat_dim = time_feat_dim
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.dropout = dropout
+
+        self.time_encoder = TimeEncoder(time_dim=time_feat_dim)
+
+        self.layers = Predictor(self.node_feat_dim + self.time_feat_dim, 6 * self.node_feat_dim, self.node_feat_dim, self.dropout)
+        
+    def compute_src_dst_node_temporal_embeddings(self, src_nodes, dst_nodes, edge_times):
+        time_emb = self.time_encoder(timestamps=torch.zeros(edge_times.shape).unsqueeze(dim=1).to(self.device))
+        time_emb = time_emb.squeeze(dim=1)
+        # print(torch.cat((self.node_raw_features[src_nodes], time_emb), dim=1).shape)
+        src_node_embeddings = self.layers(torch.cat((self.node_raw_features[src_nodes], time_emb), dim=1))
+        dst_node_embeddings = self.layers(torch.cat((self.node_raw_features[dst_nodes], time_emb), dim=1))
+        # print(src_node_embeddings.shape, dst_node_embeddings.shape)
+        return src_node_embeddings, dst_node_embeddings
+    
+    def set_neighbor_sampler(self, neighbor_sampler):
+        """
+        set neighbor sampler to neighbor_sampler and reset the random state (for reproducing the results for uniform and time_interval_aware sampling)
+        :param neighbor_sampler: NeighborSampler, neighbor sampler
+        :return:
+        """
+        self.neighbor_sampler = neighbor_sampler
+        if self.neighbor_sampler.sample_neighbor_strategy in ['uniform', 'time_interval_aware']:
+            assert self.neighbor_sampler.seed is not None
+            self.neighbor_sampler.reset_random_state()
 
 class TemporalGNNClassifier(nn.Module):
     def __init__(self, args, neighbor_finder, node_features, edge_features, src_label, dst_label):
@@ -121,6 +201,8 @@ class TemporalGNNClassifier(nn.Module):
         if self.args.model == 'GraphMixer':
             src_embeddings, dst_embeddings = self.base_model.compute_src_dst_node_temporal_embeddings(src_nodes, dst_nodes,
                                                  edge_times, n_neighbors, self.args.time_gap)
+        if self.args.model == 'WordEmb':
+            src_embeddings, dst_embeddings = self.base_model.compute_src_dst_node_temporal_embeddings(src_nodes, dst_nodes, edge_times)
         
         return src_embeddings, dst_embeddings
 

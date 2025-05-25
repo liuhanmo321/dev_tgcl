@@ -60,7 +60,7 @@ class LwF(nn.Module):
                 
                 # new_src_logits, new_dst_logits = self.model(src_nodes, dst_nodes, edges, edge_times, n_neighbors, dataset_idx, return_logits=True)
 
-                loss += distillation_loss(old_src_logits, new_src_logits, T=self.args.temperature) + distillation_loss(old_dst_logits, new_dst_logits, T=self.args.temperature)
+                loss += 0.1 * (distillation_loss(old_src_logits, new_src_logits, T=self.args.temperature) + distillation_loss(old_dst_logits, new_dst_logits, T=self.args.temperature))
 
             data_dict['loss'] = loss.item()
 

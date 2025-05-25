@@ -2,24 +2,61 @@ import os
 import sys
 from pathlib import Path
 
-
+# os.environ["WORLD_SIZE"] = "1"
 # dataset = sys.argv[1]
 #dataset = 'reddit'
 # dataset = 'yelp'
 # dataset = 'taobao'
 
-# for dataset in ['amazon', 'reddit']:
-for dataset in ['amazon']:
-# for replay_size in [250, 750]: 
-# for dataset in ['amazon', 'yelp', 'reddit']:
-    # dataset = 'yelp'
-    # model = 'TGAT'
-    model = 'DyGFormer'
-    method = 'SubGraph'
+best_params = {
+    'TGAT': {
+        'yelp': {'loss_weight': 1, 'emb_distill_weight': 0.05},
+        'reddit': {'loss_weight': 2, 'emb_distill_weight': 0.05},
+        'amazon': {'loss_weight': 2, 'emb_distill_weight': 0.1},
+        'reddit_large': {'loss_weight': 1, 'emb_distill_weight': 0.05},
+        'reddit_long': {'loss_weight': 1, 'emb_distill_weight': 0.05},
+    },
+    'GraphMixer': {
+        'yelp': {'loss_weight': 1, 'emb_distill_weight': 0.05},
+        'reddit': {'loss_weight': 2, 'emb_distill_weight': 0.05},
+        'amazon': {'loss_weight': 2, 'emb_distill_weight': 0.1},
+        'reddit_large': {'loss_weight': 2, 'emb_distill_weight': 0.05},
+        'reddit_long': {'loss_weight': 1, 'emb_distill_weight': 0.05},
+    },
+    'DyGFormer': {
+        'yelp': {'loss_weight': 0.25, 'emb_distill_weight': 0.01},
+        'reddit': {'loss_weight': 0.5, 'emb_distill_weight': 0.01},
+        'amazon': {'loss_weight': 2, 'emb_distill_weight': 0.1},
+        'reddit_large': {'loss_weight': 0.5, 'emb_distill_weight': 0.01},
+    },
+    'WordEmb': {
+        'yelp': {'loss_weight': 1, 'emb_distill_weight': 0.05},
+        'reddit': {'loss_weight': 2, 'emb_distill_weight': 0.05},
+        'amazon': {'loss_weight': 2, 'emb_distill_weight': 0.1},
+    },
+}
 
+# for dataset in ['amazon', 'reddit']:
+# for dataset in ['amazon']:
+# for replay_size in [250, 500, 750]: 
+# for memory_size in [250, 500, 750]: 
+for dataset in ['reddit_long']:
+    # dataset = 'yelp'
+    # model = 'WordEmb'
+    model = 'TGAT'
+    method = 'Finetune'
+    # method = 'Joint'
+    best = True
+
+    
     device = 0
-    rp_times = 3
-    debug_mode = 1
+    rp_times = 1
+    debug_mode = 0
+
+    train_frac = 0.8 # Default 0.8
+    
+    virt_device = 2 # Start from 2 seems right
+    os.environ["CUDA_VISIBLE_DEVICES"] = f"{virt_device}" 
 
     select = 'none' 
     Path("./result/").mkdir(parents=True, exist_ok=True)
@@ -35,10 +72,10 @@ for dataset in ['amazon']:
         lr=1e-5
         num_datasets=5        
         num_class_per_dataset=3
-        n_epoch=100
-        # n_epoch=1
+        # n_epoch=100
+        n_epoch=1
         bs = 600
-        memory_size = 500
+        # memory_size = 500
         replay_size = 500
     elif dataset=='reddit':
         lr=1e-5
@@ -56,21 +93,38 @@ for dataset in ['amazon']:
         bs = 600
         memory_size = 1000
         replay_size = 500
-
+    elif dataset=='reddit_large':
+        lr=1e-5
+        num_datasets=16
+        num_class_per_dataset=2
+        n_epoch = 1
+        bs = 600
+        memory_size = 1000
+        replay_size = 400
+    elif dataset=='reddit_long':
+        lr=1e-5
+        num_datasets=4
+        num_class_per_dataset=6
+        n_epoch = 100
+        bs = 600
+        memory_size = 1000
+        replay_size = 500
 
     select_mode = 'error_min'
     error_min_distribution = 1
     error_min_loss = 1
-    # error_min_distance_weight = 1.0
-    error_min_loss_weight = 2
-    # error_min_new_data_kept_ratio = 0.1
-    error_min_distill = 0
-    emb_distribution_distill_weight = 0.01
+    error_min_loss_weight = 2 if not best else best_params[model][dataset]['loss_weight']
+    
+    error_min_distill = 1
+    emb_distribution_distill_weight = 0.01 if not best else best_params[model][dataset]['emb_distill_weight']
+    distill_size_threshold = 0.9 # Default 0.5
+    
     error_min_hash = 0
     error_min_hash_threshold = 0.95
 
-    # partition = 'k-means'
-    partition = 'none'
+    # partition = 'kmeans'
+    partition = 'random'
+    partition_size = 10000
 
     old_emb_distribution_distill = 0
     new_emb_distribution_distill = 1
@@ -203,10 +257,13 @@ for dataset in ['amazon']:
     cmd += " --reg_gamma {}".format(reg_gamma)
     cmd += " --multihead {}".format(multihead)
     cmd += " --partition {}".format(partition)
+    cmd += " --partition_size {}".format(partition_size)
     cmd += " --error_min_distill {}".format(error_min_distill)
     cmd += " --replay_size {}".format(replay_size)
     cmd += " --error_min_hash {}".format(error_min_hash)
     cmd += " --error_min_hash_threshold {}".format(error_min_hash_threshold)
+    cmd += " --train_frac {}".format(train_frac)
+    cmd += " --distill_size_threshold {}".format(distill_size_threshold)
     os.system(cmd)
 
 
