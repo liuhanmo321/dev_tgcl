@@ -1,6 +1,6 @@
-# Learning Towards the Future on Temporal Graphs
+# A Selective Learning Method for Temporal Graph Continual Learning
 
-This is the implementation for the paper "Learning Towards the Future on Temporal Graphs".
+This is the implementation for the paper "A Selective Learning Method for Temporal Graph Continual Learning".
 
 The codes are in the folder 'SubGraphCL'.
 
@@ -12,7 +12,7 @@ python run.py
 In run.py, the important parameters are:
 
 - `dataset`: the dataset to use, can choose from 'yelp', 'reddit', 'amazon'.
-- `model`: the model to use, can choose from 'TGAT' or 'DyGFormer'.
+- `model`: the model to use, can choose from 'TGAT', 'DyGFormer' or 'GraphMixer.
 - `method`: the method to use, 'SubGraphCL' represents our method (LTF in the paper).
 
 The other parameters are the hyper-parameters for the model.
